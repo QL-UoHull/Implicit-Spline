@@ -44,7 +44,7 @@ BibTeX:
 
 ```bibtex
 @article{Li2009Piecewise,
-  author    = {Qingde Li and Jie Tian},
+  author    = {Li, Qingde and Tian, Jie},
   title     = {2D Piecewise Algebraic Splines for Implicit Modeling},
   journal   = {ACM Transactions on Graphics},
   year      = {2009},
