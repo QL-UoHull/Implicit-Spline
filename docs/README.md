@@ -5,7 +5,7 @@ This document summarizes the mathematical theory and derivations behind **2D pie
 ## Key concepts and goals
 
 - **Objective**  
-  Given a partition of \mathbb{R}^2 by polygons \(\{A_k\}\), construct basis functions \(B_{A_k,\delta}^{(n)}(x,y)\) that are:
+  Given a partition of $\mathbb{R}^2$ by polygons \(\{A_k\}\), construct basis functions \(B_{A_k,\delta}^{(n)}(x,y)\) that are:
   - piecewise polynomial and explicitly representable;
   - non‑negative and form a partition of unity;
   - locally supported for finite polygons;
