@@ -2,7 +2,7 @@
 
 This repository disseminates the paper:
 
-**Qingde Li** and **Jie Tian**, *2D Piecewise Algebraic Splines for Implicit Modeling*, ACM Transactions on Graphics (SIGGRAPH 2009).
+**Qingde Li** and **Jie Tian**, *2D Piecewise Algebraic Splines for Implicit Modeling*, ACM Transactions on Graphics (Proceedings of ACM SIGGRAPH 2009).
 
 ## Authors and affiliations
 - Qingde Li — University of Hull, United Kingdom
