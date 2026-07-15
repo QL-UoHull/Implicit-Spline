@@ -41,6 +41,8 @@ from .core import (
 from .visualization import (
     make_grid,
     draw_imp_spline,
+    draw_surface,
+    compare_delta,
 )
 
 __all__ = [
@@ -52,6 +54,8 @@ __all__ = [
     "imp_spline_2d",
     "make_grid",
     "draw_imp_spline",
+    "draw_surface",
+    "compare_delta",
 ]
 
 __version__ = "0.1.0"

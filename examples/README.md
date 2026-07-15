@@ -1,6 +1,18 @@
 # Examples
 
-Runnable examples are now available in two forms:
+Runnable examples are available in three forms:
+
+## Standalone Python script (`demo.py`)
+
+A self-contained demo that mirrors `../matlab/Demo.m`:
+
+```bash
+# from the repository root
+python examples/demo.py
+```
+
+This runs four examples — unit square, equilateral triangle, regular pentagon,
+and an irregular pentagon with a delta-sweep — and displays the resulting plots.
 
 ## Jupyter Notebooks (`../notebooks/`)
 
