@@ -10,8 +10,12 @@ This repository disseminates the paper and hosts a **reference implementation**:
 - Qingde Li — University of Hull, United Kingdom
 - Jie Tian — Chinese Academy of Sciences, China
 
-## Summary
-The paper introduces a 2D piecewise algebraic spline framework for implicit modeling over polygonal domains. It presents a construction for smooth implicit representations with controllable continuity (C^n for user-chosen *n*) and discusses properties that make the approach suitable for geometric modeling tasks.
+## Key Features
+- Explicit analytical formulation of spline basis functions \(B_{A,\delta}(x,y)\)
+- Adjustable polygon smoothing parameter \(\delta\) controlling implicit contour proximity
+- Supports **arbitrary \(C^n\) continuity** (for any prescribed integer \(n \ge 1\))
+- Efficient evaluation suitable for GPU or CPU implementations
+- Preserves non-negativity, partition of unity, and convex-hull–like behavior
 
 ## Repository status
 ✅ **Status:** This repository now includes a **reference implementation** in both MATLAB and Python, together with Jupyter notebook demos.
