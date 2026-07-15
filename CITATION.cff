@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: "2D Piecewise Algebraic Splines for Implicit Modeling"
+message: "If you use this repository or reference implementation artifacts, please cite the associated publication."
+type: software
+authors:
+  - family-names: Li
+    given-names: Qingde
+    affiliation: "University of Hull"
+  - family-names: Tian
+    given-names: Jie
+    affiliation: "Chinese Academy of Sciences"
+preferred-citation:
+  type: article
+  title: "2D Piecewise Algebraic Splines for Implicit Modeling"
+  authors:
+    - family-names: Li
+      given-names: Qingde
+    - family-names: Tian
+      given-names: Jie
+  journal: "ACM Transactions on Graphics"
+  year: 2009
+  volume: 28
+  issue: 3
+  doi: "10.1145/1516522.1516524"
