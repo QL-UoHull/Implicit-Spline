@@ -1,0 +1,9 @@
+# Sample polygon vertices for implicit spline demos.
+# Format: one vertex per line, two space-separated floats (x y).
+# This file defines an irregular hexagon centred near (1.5, 1.0).
+0.000000 0.500000
+1.000000 0.000000
+2.500000 0.200000
+3.000000 1.000000
+2.000000 2.000000
+0.500000 1.800000
