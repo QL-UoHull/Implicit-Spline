@@ -1,67 +1,168 @@
-# Theory and Derivations for 2D Piecewise Algebraic Splines
 
-This document summarizes the mathematical theory and derivations behind **2D piecewise algebraic splines for implicit modeling** (Li & Tian, ACM TOG 2009). It explains the construction of analytically expressed bivariate spline basis functions built from arbitrary polygonal partitions, highlights the central formulas, and sketches the derivation steps so implementers and researchers can reproduce the results and link them to the code in this repository.
+# README — Theory and Derivations
 
-## Key concepts and goals
+## 2D Piecewise Algebraic Splines for Implicit Modeling
 
-- **Objective**  
-  Given a partition of $\mathbb{R}^2$ by polygons $\{A_k\}$, construct basis functions $B_{A_k,\delta}^{(n)}(x,y)$ that are:
-  - piecewise polynomial and explicitly representable;
-  - non‑negative and form a partition of unity;
-  - locally supported for finite polygons;
-  - additive across nonoverlapping polygons;
-  - $C^{n-1}$ continuous for any prescribed integer order $n\ge1$.
+This document summarizes the mathematical framework behind **2D piecewise algebraic splines for implicit modeling** introduced by Li & Tian (ACM TOG 2009), and maps the theory to this repository’s implementation.
 
-- **Polygon smoothing parameter $\delta$**  
-  Controls the blending width between inside/outside of polygons; smaller $\delta$ yields contours closer to polygon boundaries.
+It is intended for:
+- researchers who want a compact derivation roadmap,
+- implementers who need formula-to-code correspondence,
+- users tuning parameters (`n`, `delta`, contour isovalue) for practical modeling.
 
-## Core construction
+---
 
-1. **Polygon characteristic function**  
-   For polygon $A$, define
-   
+## 1) Problem setting and objective
 
-$$
-   X_A(x,y)=\begin{cases}1&(x,y)\in A\
+Given a polygonal partition `{A_k}` of `R^2`, construct basis functions `B_{A_k,delta}^{(n)}(x,y)` such that each basis is:
 
-\[4pt]0&\text{otherwise.}\end{cases}
-   $$
+- **piecewise polynomial** and analytically expressible,
+- **non-negative**,
+- part of a **partition of unity** over the partition,
+- **locally supported** (for finite polygons),
+- **additive** on disjoint regions,
+- `C^(n-1)`-smooth for chosen integer order `n >= 1`.
 
+Here, `delta > 0` is a geometric smoothing scale controlling transition width near polygon boundaries.
 
+---
 
-2. **Square kernel and iterative convolution**  
-   Let $X_\square$ be the characteristic function of a square of side $2\delta$ centered at the origin. Define the order‑$n$ basis by iterated convolution:
-   
+## 2) Convolution-based definition
 
-$$
-   B_{A,\delta}^{(n)}(x,y)=\underbrace{X_A * X_\square * \cdots * X_\square}_{\text{\(n\) convolutions}}(x,y).
-   $$
+For polygon `A`, define its indicator:
 
+`X_A(x,y) = 1 if (x,y) in A, else 0`.
 
-   This yields a piecewise polynomial function with $C^{n-1}$ continuity.
+Let `X_square` be the indicator of the axis-aligned square centered at the origin with side length `2*delta`, i.e. support `[-delta,delta] x [-delta,delta]`.
 
-3. **Analytic closed form via shifted building blocks**  
-   The construction uses an explicit bivariate building block $S_{2,a,b,\delta}^{(n)}(x,y)$ expressed as a finite linear combination of shifted elementary polynomials $A_{a,b}^{(n)}$. Each polygonal basis is assembled from these blocks by summing signed implicit edges (differences of implicit vertices) around the polygon.
+The order-`n` implicit spline basis is:
 
-4. **Implicit vertex, implicit edge, implicit polygon**  
-   - **Implicit vertex**: translated building block centered at a polygon vertex.  
-   - **Implicit edge**: oriented difference of two implicit vertices; contributes the edge’s effect.  
-   - **Implicit polygon**: signed sum of implicit edges around the polygon; equals the convolution result $B_{A,\delta}^{(n)}$.
+`B_{A,delta}^{(n)} = X_A * X_square * ... * X_square`  (n convolutions with `X_square`)
 
-## Important formulas and building blocks
+Interpretation: repeated convolution with `X_square` smooths the hard polygon indicator into a compactly supported algebraic field with controlled regularity.
 
-- **Elementary polynomial** $A_{a,b}^{(n)}(x,y)$ — base polynomial pieces used to form $S_{2,a,b,\delta}^{(n)}$. See the paper for explicit expressions and case expansions for small $n$.
-- **Composite block** $S_{2,a,b,\delta}^{(n)}(x,y)$ — finite linear combination of shifted $A_{a,b}^{(n)}$ evaluations with combinatorial coefficients; this block is the core analytic kernel.
-- **Smooth unit step functions** $H_n(t)$ — used to express axis‑aligned and rectangular cases and to relate to tensor‑product univariate splines.
+---
 
-## Derivation sketch
+## 3) Explicit algebraic construction (paper Sections 3–4)
 
-1. Interpret the iterated convolution geometrically as integrating the polygon characteristic over translated square kernels; repeated integration yields finite difference masks of shifted base polynomials.
-2. Use induction on convolution order to derive the finite mask and coefficients (illustrated in the paper for $n=1,2,3$).
-3. Reduce the polygon integral to oriented edge contributions by translating the base solution to polygon vertices and summing signed edge terms (Theorem 3.4).
-4. Treat axis‑aligned and degenerate cases using $H_n$ functions and explicit handling of orientations.
+The paper derives a closed form by introducing a bivariate building block `S_{2,a,b,delta}^{(n)}(x,y)`, expressed as finite alternating sums of shifted elementary polynomial primitives `A_{a,b}^{(n)}` (Eq. (7)–(8) in the paper).
 
-## Proven properties
+High-level form:
 
-- **Nonnegativity:** \(0\le B_{A,\delta}^{(n)}(x,y)\le 1\).  
-- **Partition of unity:** If \(\{A_k\}\) partition \(\mathbb{R}^2\), then \(\sum_k B_{A_k,\delta}^{(n)}(x,y
+`S_{2,a,b,delta}^{(n)}(x,y) = (1 / (4*delta^2)^n) * sum_{i=0..n} sum_{j=0..n} [(-1)^(i+j) * c_i * c_j * F_{i,j}(x,y)]`
+
+where `F_{i,j}` are shifted evaluations of `A_{a,b}^{(n)}` and `c_i` are combinatorial coefficients induced by repeated box convolution.
+
+### 3.1) Implicit geometric operators
+
+The construction is organized through three objects:
+
+1. **Implicit vertex**: translated copy of the central building block at polygon vertex `V`.
+2. **Implicit edge**: oriented difference of endpoint implicit vertices.
+3. **Implicit polygon**: signed sum of implicit edges around polygon boundary.
+
+The key theorem (Theorem 3.4) shows this edge-sum representation equals the convolution-defined `B_{A,delta}^{(n)}`.
+
+---
+
+## 4) Derivation roadmap (implementation-oriented)
+
+1. **Geometric integral view of convolution**  
+   Evaluate `B_{A,delta}^{(n)}(P)` as overlap measure between `A` and translated kernel supports around point `P`.
+
+2. **Finite-difference pattern from repeated box convolution**  
+   Iterating square convolution yields alternating shifted polynomial sums; for `n=1,2,3`, masks appear as `2x2`, `3x3`, `4x4` patterns.
+
+3. **Boundary decomposition**  
+   Convert area expression into oriented boundary contributions: edge terms emerge as endpoint differences.
+
+4. **Special/degenerate cases**  
+   Axis-aligned and vertical/horizontal edge cases are handled explicitly (including formulations via smooth steps `H_n`, paper Eq. (12)) to maintain correctness across polygon configurations.
+
+---
+
+## 5) Fundamental properties
+
+From convolution and explicit formulas:
+
+- **Boundedness / non-negativity**: `0 <= B_{A,delta}^{(n)}(x,y) <= 1`.
+- **Partition of unity**: if `{A_k}` partitions `R^2` up to measure-zero overlaps, then `sum_k B_{A_k,delta}^{(n)}(x,y) = 1`.
+- **Local support**: finite polygons induce finite support neighborhoods.
+- **Additivity on disjoint sets**: `B_{A union C,delta}^{(n)} = B_{A,delta}^{(n)} + B_{C,delta}^{(n)}` for `A intersect C = empty`.
+- **Smoothness**: `B_{A,delta}^{(n)} in C^(n-1)`.
+
+---
+
+## 6) Parameter effects and practical guidance
+
+### 6.1) Smoothness order `n`
+- Larger `n`: smoother fields, broader effective transition, higher polynomial degree/cost.
+- Smaller `n`: sharper transition, lower cost, less differentiability.
+
+### 6.2) Smoothing scale `delta`
+- Smaller `delta`: contours track polygon boundaries more tightly.
+- Larger `delta`: stronger smoothing and wider blending zones.
+
+Rule of thumb: choose `delta` as a fraction of the smallest local feature size; reduce grid spacing/sampling step as `delta` decreases.
+
+### 6.3) Contour isovalue
+For normalized occupancy-like fields, `tau = 0.5` is common, but application-specific thresholds may be preferable after blending/weighting.
+
+### 6.4) Vertex orientation
+Use consistent polygon orientation (typically CCW for outer boundaries). If holes are represented, orient inner boundaries oppositely to preserve sign conventions.
+
+---
+
+## 7) Code mapping in this repository
+
+Primary implementation is in:
+
+- `src/implicit_spline.py`
+
+Expected responsibilities:
+
+- evaluate elementary primitives `A_{a,b}^{(n)}`,
+- assemble `S_{2,a,b,delta}^{(n)}` via finite shifted masks,
+- construct implicit vertex/edge/polygon contributions,
+- compute weighted sums and extract contours (including forms related to Eq. (5), Eq. (20) in the paper).
+
+Suggested public parameters:
+
+- `smoothness_order` (`n`),
+- `delta`,
+- polygon vertex order / winding policy,
+- contour `isovalue`,
+- sampling resolution / grid step.
+
+---
+
+## 8) Numerical and robustness notes
+
+- **Stability near degeneracies**: guard near-zero edge lengths and nearly collinear triples.
+- **Normalization checks**: verify partition-of-unity numerically on test partitions.
+- **Regression tests**:
+  - single rectangle (compare against separable 1D reference where applicable),
+  - adjacent polygons (check continuity and sum-to-one),
+  - varying `n,delta` sweep (check monotonic smoothness/blur behavior).
+- **Performance**: precompute mask coefficients and reuse shifted evaluations when scanning many query points.
+
+---
+
+## 9) Minimal validation checklist
+
+For any new implementation change:
+
+1. `0 <= B <= 1` on sampled domain.
+2. `sum_k B_k ~= 1` on partition test set.
+3. No visible seams across shared edges for expected smoothness.
+4. Sharper boundary behavior as `delta -> 0+` (with correspondingly refined sampling).
+5. Continuity order consistent with `n` in numerical derivative probes.
+
+---
+
+## Reference
+
+Li, Q. and Tian, J. (2009).  
+**2D Piecewise Algebraic Splines for Implicit Modeling.**  
+*ACM Transactions on Graphics*, 28(2), Article 13.  
+DOI: https://doi.org/10.1145/1516522.1516524
