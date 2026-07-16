@@ -367,9 +367,11 @@ class TestPolygonValidate:
 
     def test_rejects_degenerate_edge(self):
         # A polygon with a zero-length edge (two identical consecutive vertices
-        # after deduplication) should raise
-        # Use a value clearly above 1e-12 tolerance but semantically "same point"
-        P_zero = np.array([[0, 0], [0.0, 0.0 + 1e-11], [1, 0], [0.5, 1]], dtype=float)
+        # after deduplication) should raise.
+        # Value 1e-10 is clearly above the 1e-12 deduplication threshold,
+        # so the two vertices are treated as distinct and the zero-length edge
+        # is detected by the edge-length check.
+        P_zero = np.array([[0, 0], [0.0, 0.0 + 1e-10], [1, 0], [0.5, 1]], dtype=float)
         with pytest.raises(ValueError):
             polygon_validate(P_zero)
 
@@ -565,9 +567,10 @@ class TestDecompositionEquivalence:
                 f"At deep interior points both methods must agree; max err={float(deep_err.max()):.4f}"
             )
 
-        # Exterior points: both methods must give ≈ 0
-        ext_mask = (Z_direct < 1e-10) | (Z_union < 1e-10)
-        # At exterior points the direct is also near-zero (tested elsewhere)
+        # Exterior points: direct should give ≈ 0 wherever the union is 0.
+        # Threshold 0.06 = slightly more than one delta (0.05) to account for
+        # corner regions where the signed-distance field tapers more smoothly
+        # than the product construction.
         assert float(Z_direct[Z_union < 1e-10].max()) < 0.06, (
             "Direct gives non-zero outside all convex pieces"
         )

@@ -253,6 +253,8 @@ def _unsigned_seg_dist(x, y, x1: float, y1: float,
     """
     dx = x2 - x1
     dy = y2 - y1
+    # Use squared length to avoid sqrt; 1e-24 guards against squared-length
+    # underflow (segment shorter than ~1e-12 in each coordinate).
     len2 = dx * dx + dy * dy
     if len2 < 1e-24:
         return np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
@@ -296,6 +298,8 @@ def _point_in_polygon(x, y, P) -> np.ndarray:
             # Safe division: denom != 0 wherever crosses_y is True.
             x_intersect = np.where(
                 crosses_y,
+                # 1e-30: strictly below machine epsilon squared; safe divisor
+                # when crosses_y is True (denom != 0 by construction).
                 (xj - xi) * (y - yi) / np.where(np.abs(denom) < 1e-30, 1.0, denom) + xi,
                 0.0,
             )
@@ -511,10 +515,12 @@ def triangulate_polygon(P):
         i = idx_list[(k - 1) % n]
         j = idx_list[k]
         ll = idx_list[(k + 1) % n]
-        # Must be a convex (left-turn) vertex in the current polygon
         ax, ay = P[i]
         bx, by = P[j]
         cx, cy = P[ll]
+        # Must be a convex (left-turn) vertex in the current polygon.
+        # cross > 1e-12 excludes reflex vertices (cross < 0) AND near-collinear
+        # vertices (cross ≈ 0) which would produce degenerate zero-area triangles.
         cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
         if cross <= 1e-12:
             return False
