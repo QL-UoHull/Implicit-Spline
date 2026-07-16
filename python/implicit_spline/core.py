@@ -80,9 +80,11 @@ _DEGENERATE_EDGE_TOL = 1e-10
 _INTERSECTION_TOL = 1e-12
 
 # Default Gauss–Legendre quadrature order for the H-kernel boundary integral.
-# The integrand is a polynomial of degree O(n) in the Gauss nodes, so 16
-# points integrate the relevant terms exactly for n ≤ 6.
-_DEFAULT_QUADRATURE_ORDER = 16
+# The H-derivative kernel K_y = H'(Δy + δ/2, δ, n) has compact support of
+# width δ along each edge.  For large polygons with long edges (edge length ≫ δ)
+# we need enough GL nodes to resolve this narrow support accurately.  96 nodes
+# give ≈ 0.3 % error for δ/edge ≥ 0.04 (e.g. δ=0.18 on an edge of length 4.5).
+_DEFAULT_QUADRATURE_ORDER = 96
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -756,7 +758,7 @@ def imp_spline_2d(
     P     : (m, 2) array of polygon vertices (CW or CCW; auto-corrected to CCW)
     delta : transition bandwidth (same role as in MATLAB ``H.m``)
     n     : smoothness order (same role as in MATLAB ``H.m``)
-    quadrature_order : Gauss–Legendre points per edge (default 16)
+    quadrature_order : Gauss–Legendre points per edge (default 96)
     """
     if delta <= 0:
         raise ValueError(f"imp_spline_2d: delta must be positive (got {delta}).")
