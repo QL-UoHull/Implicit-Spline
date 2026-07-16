@@ -15,11 +15,17 @@ constructions and for compatibility with the MATLAB primitives.
 from __future__ import annotations
 
 import warnings
+from functools import lru_cache
 from math import comb, factorial
 
 import numpy as np
 
 
+# Tolerances used throughout the geometry layer:
+# - _CLOSE_TOL: exact closing-vertex / duplicate-vertex comparisons
+# - _DEGENERATE_EDGE_TOL: minimum admissible geometric edge length / area scale
+# - _INTERSECTION_TOL: orientation/intersection robustness for segment predicates
+# - _DEFAULT_QUADRATURE_ORDER: Gauss-Legendre order for edge integrals
 _CLOSE_TOL = 1e-12
 _DEGENERATE_EDGE_TOL = 1e-10
 _INTERSECTION_TOL = 1e-12
@@ -337,12 +343,17 @@ def _gauss_legendre_rule(order: int = _DEFAULT_QUADRATURE_ORDER):
     return 0.5 * (pts + 1.0), 0.5 * weights
 
 
+@lru_cache(maxsize=None)
+def _bspline_coefficients(order: int):
+    return tuple(((-1) ** k) * comb(order, k) for k in range(order + 1))
+
+
 def _cardinal_bspline(order: int, u) -> np.ndarray:
     """Centered cardinal B-spline density on the unit-knot line."""
     u = np.asarray(u, dtype=float)
     out = np.zeros_like(u)
-    for k in range(order + 1):
-        out += ((-1) ** k) * comb(order, k) * np.maximum(u - k, 0.0) ** (order - 1)
+    for k, coeff in enumerate(_bspline_coefficients(order)):
+        out += coeff * np.maximum(u - k, 0.0) ** (order - 1)
     return out / factorial(order - 1)
 
 
@@ -350,8 +361,8 @@ def _cardinal_bspline_cdf(order: int, u) -> np.ndarray:
     """Antiderivative of :func:`_cardinal_bspline` with unit asymptote."""
     u = np.asarray(u, dtype=float)
     out = np.zeros_like(u)
-    for k in range(order + 1):
-        out += ((-1) ** k) * comb(order, k) * np.maximum(u - k, 0.0) ** order
+    for k, coeff in enumerate(_bspline_coefficients(order)):
+        out += coeff * np.maximum(u - k, 0.0) ** order
     return out / factorial(order)
 
 
@@ -573,12 +584,14 @@ def validate_partition(polygons, outer_polygon=None, *, tol: float = _DEGENERATE
                             raise ValueError(
                                 f"validate_partition: cells {i} and {j} have partially overlapping edges."
                             )
-            centroid_i = Pi.mean(axis=0)
-            centroid_j = Pj.mean(axis=0)
-            if _point_in_polygon_mask(np.array([centroid_i[0]]), np.array([centroid_i[1]]), Pj)[0]:
-                raise ValueError(f"validate_partition: cell {i} lies inside cell {j}.")
-            if _point_in_polygon_mask(np.array([centroid_j[0]]), np.array([centroid_j[1]]), Pi)[0]:
-                raise ValueError(f"validate_partition: cell {j} lies inside cell {i}.")
+            inside_i = _point_in_polygon_mask(Pi[:, 0], Pi[:, 1], Pj)
+            inside_j = _point_in_polygon_mask(Pj[:, 0], Pj[:, 1], Pi)
+            strict_i = inside_i & ~_point_on_polygon_boundary(Pi, Pj, tol)
+            strict_j = inside_j & ~_point_on_polygon_boundary(Pj, Pi, tol)
+            if np.any(strict_i):
+                raise ValueError(f"validate_partition: a vertex of cell {i} lies inside cell {j}.")
+            if np.any(strict_j):
+                raise ValueError(f"validate_partition: a vertex of cell {j} lies inside cell {i}.")
 
     all_vertices = [tuple(v.tolist()) for P in cells for v in P]
     for i, Pi in enumerate(cells):
@@ -613,6 +626,15 @@ def validate_partition(polygons, outer_polygon=None, *, tol: float = _DEGENERATE
         summary["outer_area"] = outer_area
 
     return summary
+
+
+def _point_on_polygon_boundary(points, P, tol: float = _INTERSECTION_TOL) -> np.ndarray:
+    """Boolean mask for points lying on any edge of polygon ``P``."""
+    points = np.asarray(points, dtype=float)
+    mask = np.zeros(len(points), dtype=bool)
+    for a, b in _polygon_edges(P):
+        mask |= np.array([_point_on_segment(pt, a, b, tol) for pt in points], dtype=bool)
+    return mask
 
 
 def _point_in_polygon_mask(x, y, P) -> np.ndarray:

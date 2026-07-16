@@ -28,7 +28,7 @@ from implicit_spline.paper_examples import (
     SECTION7_TEST_POINTS,
 )
 
-DELTA = 0.22
+TEST_DELTA = 0.22
 N_ORDER = 2
 ABS_TOL = 1e-12
 FIELD_TOL = 5e-3
@@ -45,9 +45,9 @@ def test_section7_polygons_are_ccw_and_non_convex(name):
 def test_section7_points_match_expected_interior_and_exterior(name):
     P = SECTION7_POLYGONS[name]
     for x, y in SECTION7_TEST_POINTS[name]["inside"]:
-        assert float(imp_spline_2d(x, y, P, delta=DELTA, n=N_ORDER)) > 0.95
+        assert float(imp_spline_2d(x, y, P, delta=TEST_DELTA, n=N_ORDER)) > 0.95
     for x, y in SECTION7_TEST_POINTS[name]["outside"]:
-        assert float(imp_spline_2d(x, y, P, delta=DELTA, n=N_ORDER)) < 0.15
+        assert float(imp_spline_2d(x, y, P, delta=TEST_DELTA, n=N_ORDER)) < 0.15
 
 
 @pytest.mark.parametrize("name", sorted(SECTION7_POLYGONS))
@@ -58,8 +58,8 @@ def test_direct_equals_triangulation_decomposition(name):
         np.linspace(P[:, 0].min() - 0.4, P[:, 0].max() + 0.4, 90),
         np.linspace(P[:, 1].min() - 0.4, P[:, 1].max() + 0.4, 90),
     )
-    direct = imp_spline_2d(X, Y, P, delta=DELTA, n=N_ORDER)
-    decomp = convex_decomp_field(X, Y, tris, delta=DELTA, n=N_ORDER)
+    direct = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+    decomp = convex_decomp_field(X, Y, tris, delta=TEST_DELTA, n=N_ORDER)
     np.testing.assert_allclose(direct, decomp, rtol=0.0, atol=ABS_TOL)
 
 
@@ -70,9 +70,9 @@ def test_direct_equals_multiple_valid_decompositions(name):
         np.linspace(P[:, 0].min() - 0.4, P[:, 0].max() + 0.4, 70),
         np.linspace(P[:, 1].min() - 0.4, P[:, 1].max() + 0.4, 70),
     )
-    direct = imp_spline_2d(X, Y, P, delta=DELTA, n=N_ORDER)
-    decomp_a = convex_decomp_field(X, Y, triangulate_polygon(P), delta=DELTA, n=N_ORDER)
-    decomp_b = convex_decomp_field(X, Y, triangulate_polygon(np.roll(P, -3, axis=0)), delta=DELTA, n=N_ORDER)
+    direct = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+    decomp_a = convex_decomp_field(X, Y, triangulate_polygon(P), delta=TEST_DELTA, n=N_ORDER)
+    decomp_b = convex_decomp_field(X, Y, triangulate_polygon(np.roll(P, -3, axis=0)), delta=TEST_DELTA, n=N_ORDER)
     np.testing.assert_allclose(direct, decomp_a, rtol=0.0, atol=ABS_TOL)
     np.testing.assert_allclose(direct, decomp_b, rtol=0.0, atol=ABS_TOL)
 
@@ -85,8 +85,8 @@ def test_no_internal_edge_seams_on_decomposition(name):
         np.linspace(P[:, 0].min() - 0.2, P[:, 0].max() + 0.2, 120),
         np.linspace(P[:, 1].min() - 0.2, P[:, 1].max() + 0.2, 120),
     )
-    direct = imp_spline_2d(X, Y, P, delta=DELTA, n=N_ORDER)
-    decomp = convex_decomp_field(X, Y, tris, delta=DELTA, n=N_ORDER)
+    direct = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+    decomp = convex_decomp_field(X, Y, tris, delta=TEST_DELTA, n=N_ORDER)
     err = np.abs(direct - decomp)
     assert float(err.max()) <= ABS_TOL
     assert err.size > 0
@@ -110,7 +110,9 @@ def test_partition_sum_matches_outer_boundary_basis():
 
 
 def test_partition_sum_is_nearly_one_away_from_outer_boundary():
-    X, Y = np.meshgrid(np.linspace(1.0, 3.1, 60), np.linspace(1.1, 3.0, 60))
+    x0, x1 = PARTITION_OUTER[:, 0].min() + 1.0, PARTITION_OUTER[:, 0].max() - 1.7
+    y0, y1 = PARTITION_OUTER[:, 1].min() + 1.1, PARTITION_OUTER[:, 1].max() - 1.25
+    X, Y = np.meshgrid(np.linspace(x0, x1, 60), np.linspace(y0, y1, 60))
     _, total = partition_basis_fields(PARTITION_CELLS, X, Y, delta=0.18, n=N_ORDER)
     active = total > 0.995
     assert active.any(), "expected at least one deep-interior sample inside the partition"
@@ -139,7 +141,7 @@ def test_polygon_with_hole_composition_still_behaves():
     assert annulus > 0.8
 
 
-def test_polygon_validate_uses_absolute_closing_tolerance_only():
+def test_polygon_validate_handles_large_coordinates_without_relative_tolerance_collapsing_vertices():
     P = np.array([
         [1_000_000.0, 1_000_000.0],
         [1_000_002.0, 1_000_000.0],
@@ -168,17 +170,17 @@ def test_polygon_validate_rejects_collinear_overlap_and_invalid_touching():
         np.array([1.0, 0.0]), np.array([3.0, 0.0]),
     ) == "overlap"
 
-    touching = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [1.0, 1.0], [0.0, 2.0], [1.0, 0.0]], dtype=float)
+    invalid_touching_polygon = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [1.0, 1.0], [0.0, 2.0], [1.0, 0.0]], dtype=float)
     with pytest.raises(ValueError, match="invalid touching edges"):
-        polygon_validate(touching)
+        polygon_validate(invalid_touching_polygon)
 
 
 def test_imp_spline_handles_repeated_closing_vertex():
     P = SECTION7_POLYGONS["heart_like"]
     closed = np.vstack([P, P[0]])
     X, Y = np.meshgrid(np.linspace(-2.8, 2.8, 40), np.linspace(-2.4, 1.5, 40))
-    open_field = imp_spline_2d(X, Y, P, delta=DELTA, n=N_ORDER)
-    closed_field = imp_spline_2d(X, Y, closed, delta=DELTA, n=N_ORDER)
+    open_field = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+    closed_field = imp_spline_2d(X, Y, closed, delta=TEST_DELTA, n=N_ORDER)
     np.testing.assert_allclose(open_field, closed_field, rtol=0.0, atol=ABS_TOL)
 
 
@@ -213,5 +215,5 @@ class TestSafeContour:
         plt.close(fig)
 
         fig2, ax2 = plt.subplots()
-        draw_imp_spline(SECTION7_POLYGONS['heart_like'], delta=DELTA, n=N_ORDER, N=40, ax=ax2, iso_level=1.5)
+        draw_imp_spline(SECTION7_POLYGONS['heart_like'], delta=TEST_DELTA, n=N_ORDER, N=40, ax=ax2, iso_level=1.5)
         plt.close(fig2)
