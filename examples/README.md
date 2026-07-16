@@ -17,11 +17,12 @@ The script includes:
 1. **convex polygon** demos (square/triangle/pentagon),
 2. convex **delta-sweep** and **smoothness-order** (`n`) comparisons,
 3. paper-style multi-panel contour evolution under varying `delta`,
-4. explicit **concave/freeform polygon** contour demos,
-5. **polygons with holes** (single hole + multiple holes + hole delta panel), and
-6. a true multi-polygon **2D partition** section showing both:
+4. a **freeform-like composed field** built from multiple convex components,
+5. **polygons with holes** shown explicitly as composed fields
+   (outer loop field multiplied by complements of convex inner-loop fields), and
+6. a convex-cell **2D partition** section showing both:
    - the partition net itself, and
-   - the resulting family / sum of basis-function surfaces.
+   - per-cell fields plus aggregate (unnormalized-sum) field surfaces.
 
 ## Jupyter Notebooks (`../notebooks/`)
 
@@ -47,9 +48,9 @@ The new advanced examples are intended to better match the kinds of figures
 shown in the paper:
 
 - multi-panel contour evolution under increasing `delta`,
-- freeform / concave curve design from hand-crafted polygons,
+- freeform-like shape design via composition of convex components,
 - polygon-with-hole examples, and
-- 2D partition-based basis-function surfaces.
+- 2D partition cell-wise and aggregate implicit-field surfaces.
 
 These examples are illustrative rather than exact reproductions of any one
 figure from the paper, but they provide a much closer visual and conceptual
