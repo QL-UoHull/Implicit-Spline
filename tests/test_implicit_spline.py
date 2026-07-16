@@ -195,11 +195,14 @@ def test_triangulate_polygon_returns_exact_count_or_raises():
 
 
 class TestSafeContour:
+    """Regression tests for safe contour plotting with out-of-range levels."""
     def setup_method(self):
+        """Force the headless Agg backend for plotting tests."""
         import matplotlib
         matplotlib.use('Agg')
 
     def test_safe_contour_and_draw_imp_spline(self):
+        """Contours outside the data range should not raise under headless Matplotlib."""
         import matplotlib.pyplot as plt
         from implicit_spline.visualization import _safe_contour, draw_imp_spline
 

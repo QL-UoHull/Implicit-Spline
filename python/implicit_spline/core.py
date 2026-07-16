@@ -338,6 +338,7 @@ def _gauss_legendre_rule(order: int = _DEFAULT_QUADRATURE_ORDER):
 
 
 def _cardinal_bspline(order: int, u) -> np.ndarray:
+    """Centered cardinal B-spline density on the unit-knot line."""
     u = np.asarray(u, dtype=float)
     out = np.zeros_like(u)
     for k in range(order + 1):
@@ -346,6 +347,7 @@ def _cardinal_bspline(order: int, u) -> np.ndarray:
 
 
 def _cardinal_bspline_cdf(order: int, u) -> np.ndarray:
+    """Antiderivative of :func:`_cardinal_bspline` with unit asymptote."""
     u = np.asarray(u, dtype=float)
     out = np.zeros_like(u)
     for k in range(order + 1):
@@ -354,16 +356,19 @@ def _cardinal_bspline_cdf(order: int, u) -> np.ndarray:
 
 
 def _box_spline_1d(t, delta: float, n: int) -> np.ndarray:
+    """1D n-fold box-spline kernel for smoothing width ``delta``."""
     u = np.asarray(t, dtype=float) / (2.0 * delta) + 0.5 * n
     return _cardinal_bspline(n, u) / (2.0 * delta)
 
 
 def _box_spline_1d_cdf(t, delta: float, n: int) -> np.ndarray:
+    """Cumulative 1D box-spline kernel used in the boundary integral."""
     u = np.asarray(t, dtype=float) / (2.0 * delta) + 0.5 * n
     return _cardinal_bspline_cdf(n, u)
 
 
 def _edge_contribution(x, y, p0, p1, delta: float, n: int, nodes, weights) -> np.ndarray:
+    """Evaluate one oriented boundary-edge contribution by Gauss-Legendre quadrature."""
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     x0, y0 = float(p0[0]), float(p0[1])
@@ -381,16 +386,19 @@ def _edge_contribution(x, y, p0, p1, delta: float, n: int, nodes, weights) -> np
     return contrib
 
 
-def _polygon_edges(P):
+def _polygon_edges(P) -> list[tuple[np.ndarray, np.ndarray]]:
+    """Return the consecutive directed edges of polygon ``P``."""
     return [(P[i], P[(i + 1) % len(P)]) for i in range(len(P))]
 
 
 def _canonical_point(p, tol: float = _CLOSE_TOL):
+    """Map a floating-point coordinate to an integer hash key at tolerance ``tol``."""
     scale = 1.0 / tol
     return tuple(int(np.round(coord * scale)) for coord in np.asarray(p, dtype=float))
 
 
 def _canonical_edge_key(p0, p1, tol: float = _CLOSE_TOL):
+    """Create an orientation-independent edge identifier for hashing/matching."""
     a = _canonical_point(p0, tol)
     b = _canonical_point(p1, tol)
     return (a, b) if a <= b else (b, a)
@@ -608,6 +616,7 @@ def validate_partition(polygons, outer_polygon=None, *, tol: float = _DEGENERATE
 
 
 def _point_in_polygon_mask(x, y, P) -> np.ndarray:
+    """Vectorized even-odd ray-casting test for points inside polygon ``P``."""
     inside = np.zeros(np.broadcast(x, y).shape, dtype=bool)
     px = np.asarray(P[:, 0], dtype=float)
     py = np.asarray(P[:, 1], dtype=float)
