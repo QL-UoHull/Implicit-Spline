@@ -14,15 +14,45 @@ python examples/demo.py
 
 The script includes:
 
-1. **convex polygon** demos (square/triangle/pentagon),
-2. convex **delta-sweep** and **smoothness-order** (`n`) comparisons,
-3. paper-style multi-panel contour evolution under varying `delta`,
-4. a **freeform-like composed field** built from multiple convex components,
-5. **polygons with holes** shown explicitly as composed fields
-   (outer loop field multiplied by complements of convex inner-loop fields), and
-6. a convex-cell **2D partition** section showing both:
-   - the partition net itself, and
-   - per-cell fields plus aggregate (unnormalized-sum) field surfaces.
+1. **Convex polygons** — square, triangle, pentagon, delta/smoothness sweeps, and
+   a paper-style multi-panel contour-evolution figure.
+2. **Polygons with holes** — shown explicitly as composed implicit fields:
+   outer-loop field multiplied by complements of convex inner-loop fields.
+3. **Concave polygon via convex decomposition** — the correct way to represent a
+   concave shape using `imp_spline_2d`:
+   - One explicit **L-shaped concave polygon** with vertices listed in **CCW
+     boundary order**, verified with `polygon_signed_area > 0`.
+   - The shape is represented through a **convex decomposition** (two
+     non-overlapping convex pieces tiling the L-shape).
+   - Pieces are combined with the **bounded smooth union**
+     `B = 1 − ∏_k (1 − B_k)` (`convex_decomp_field`), which stays in
+     [0, 1] unlike a raw sum.
+   - The original CCW boundary and the decomposition edges are drawn separately.
+   - A delta-evolution panel mirrors the paper-style figures.
+4. **2D polygon partition** — a valid partition-basis demonstration:
+   - Four irregular convex cells with non-axis-aligned shared boundaries tiling
+     [0, 3] × [0, 2].
+   - **Normalized basis functions** `B̂_k = B_k / max(Σ_j B_j, ε)`
+     (`partition_basis_normalized`) that satisfy partition of unity by
+     construction.
+   - Numerical diagnostic printed to stdout:
+     `max|Σ_k B̂_k − 1| = 0.00e+00` over the partition interior.
+   - Gallery of individual cell basis functions and a sum-surface verification.
+
+### Why CCW order alone is insufficient for concave polygons
+
+`imp_spline_2d` computes a *product* of smooth half-plane fields — one per
+edge.  At a reflex vertex the interior lies on the "wrong" side of an adjacent
+half-plane, so the product is 0 there even though the point is geometrically
+inside the polygon.  Reordering vertices to CCW corrects the winding but
+cannot repair this topological deficiency; a convex decomposition is required.
+
+### Why a raw field sum is not a partition basis
+
+Near shared cell boundaries, all adjacent cells have B_k < 1 (the field
+transitions from 1 to 0 over a band of width δ near each edge), so their raw
+sum is less than 1 there.  Normalizing each B_k by the running sum ensures
+Σ_k B̂_k = 1 everywhere inside the partition domain.
 
 ## Jupyter Notebooks (`../notebooks/`)
 
@@ -42,16 +72,3 @@ The script includes:
 
 `sample_polygon.txt` — a six-vertex irregular hexagon in plain-text format.
 
-## Notes
-
-The new advanced examples are intended to better match the kinds of figures
-shown in the paper:
-
-- multi-panel contour evolution under increasing `delta`,
-- freeform-like shape design via composition of convex components,
-- polygon-with-hole examples, and
-- 2D partition cell-wise and aggregate implicit-field surfaces.
-
-These examples are illustrative rather than exact reproductions of any one
-figure from the paper, but they provide a much closer visual and conceptual
-match than the previous minimal demos.
