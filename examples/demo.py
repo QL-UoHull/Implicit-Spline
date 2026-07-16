@@ -44,7 +44,6 @@ from implicit_spline import imp_spline_2d, draw_imp_spline
 from implicit_spline.visualization import (
     compare_delta,
     compare_n,
-    draw_surface,
     panel_delta_shapes,
     partition_basis_surfaces,
     draw_polygon_outline,
