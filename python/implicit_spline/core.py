@@ -83,7 +83,7 @@ _INTERSECTION_TOL = 1e-12
 # The H-derivative kernel K_y = H'(Δy + δ/2, δ, n) has compact support of
 # width δ along each edge.  For large polygons with long edges (edge length ≫ δ)
 # we need enough GL nodes to resolve this narrow support accurately.  96 nodes
-# give ≈ 0.3 % error for δ/edge ≥ 0.04 (e.g. δ=0.18 on an edge of length 4.5).
+# give ≈0.3% error for δ/edge ≥ 0.04 (e.g. δ=0.18 on an edge of length 4.5).
 _DEFAULT_QUADRATURE_ORDER = 96
 
 
@@ -98,7 +98,7 @@ def H(t, delta: float = 1.0, n: int = 2) -> np.ndarray:
     Direct port of MATLAB ``H.m``.  Returns a smooth monotone function
     that transitions from 0 (at ``t ≤ 0``) to 1 (at ``t ≥ delta``) using a
     degree-(2*n+1) Bernstein polynomial satisfying H^(k)(0) = H^(k)(delta) = 0
-    for k = 1 … n.  The result is C^n continuous at both transition points.
+    for k = 1, ..., n.  The result is C^n continuous at both transition points.
 
     Parameters
     ----------
