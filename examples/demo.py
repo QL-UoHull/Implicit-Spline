@@ -3,15 +3,36 @@ demo.py
 -------
 Standalone Python demonstration of the 2D Piecewise Algebraic Implicit Spline.
 
-This demo extends the paper's core scenarios and is organized into three
-feature-focused sections:
+This demo is organized into three feature-focused sections:
 
   1. Convex polygons
   2. Polygons with holes (composed implicit fields)
-  3. Collections of polygons forming a 2D partition
+  3. Concave polygon via convex decomposition  ← Section 7 (corrected)
+  4. Collections of convex polygons forming a 2D partition  ← Section 9 (corrected)
 
-It also includes paper-style multi-panel figures inspired by the examples shown
-in the paper.
+Design notes
+------------
+**Concave polygons (Section 7)**
+  The core function ``imp_spline_2d`` is a *product* of smooth half-plane
+  fields—one per polygon edge—so it is exact for *convex* polygons only.
+  Feeding a concave polygon directly gives incorrect results near reflex
+  vertices (the interior product can be zero there).
+
+  The correct approach is a convex decomposition:
+
+  1. Provide the concave polygon with vertices in **CCW boundary order**
+     (verified via ``polygon_signed_area > 0``).
+  2. Decompose it into non-overlapping convex pieces.
+  3. Combine piece fields with the **bounded smooth union**
+     ``B = 1 − ∏_k (1 − B_k)`` (``convex_decomp_field``), which stays in
+     [0, 1] unlike a raw sum.
+
+**Partition basis (Section 9)**
+  A raw sum Σ B_k over partition cells is *not* a partition of unity—it
+  can exceed 1 near cell interiors and falls below 1 near shared edges.
+  The correct partition basis normalizes each cell field:
+  ``B̂_k = B_k / max(Σ_j B_j, ε)``, which satisfies Σ_k B̂_k = 1 exactly
+  wherever the denominator exceeds ε.
 
 Run from the repository root::
 
@@ -40,7 +61,13 @@ if os.path.isdir(_python_dir):
 import numpy as np
 import matplotlib.pyplot as plt
 
-from implicit_spline import imp_spline_2d, draw_imp_spline
+from implicit_spline import (
+    imp_spline_2d,
+    draw_imp_spline,
+    polygon_signed_area,
+    convex_decomp_field,
+    partition_basis_normalized,
+)
 from implicit_spline.visualization import (
     compare_delta,
     compare_n,
@@ -48,6 +75,7 @@ from implicit_spline.visualization import (
     partition_basis_surfaces,
     draw_polygon_outline,
     make_grid,
+    _safe_contour,
 )
 
 # ── Shared parameters ─────────────────────────────────────────────────────────
@@ -73,7 +101,7 @@ def plot_polygon_with_holes(outer, holes, delta=0.15, n=2, N=320, title=None):
 
     cf = ax1.contourf(X, Y, Z, levels=20, cmap='viridis')
     plt.colorbar(cf, ax=ax1)
-    ax1.contour(X, Y, Z, levels=[0.5], colors='white', linewidths=2)
+    _safe_contour(ax1, X, Y, Z, levels=[0.5], colors='white', linewidths=2)
     draw_polygon_outline(outer, ax=ax1, linestyle=':', color='0.55', linewidth=0.9,
                          marker='o', markersize=3)
     for hole in holes:
@@ -163,39 +191,6 @@ fig6 = panel_delta_shapes(
 )
 fig6.canvas.manager.set_window_title("Demo — Convex polygon paper-style delta panel")
 
-# Example 7: Freeform silhouette via composition of convex components
-print("  Example 7: freeform silhouette via convex decomposition (composed field)")
-convex_components = [
-    np.array([[-1.00, -0.52], [-0.86, 0.48], [-0.30, 0.78], [0.05, 0.32], [-0.20, -0.58]], dtype=float),
-    np.array([[0.00, -0.45], [0.35, 0.18], [0.95, -0.50], [0.80, -0.85], [0.22, -0.80]], dtype=float),
-    np.array([[-0.10, 0.12], [0.15, 0.70], [0.58, 0.20], [0.30, -0.15]], dtype=float),
-]
-all_cmp_pts = np.vstack(convex_components)
-X7, Y7 = make_grid(all_cmp_pts, N=320, pad_fraction=0.20)
-Z7 = np.zeros_like(X7)
-for poly in convex_components:
-    Z7 += imp_spline_2d(X7, Y7, poly, delta=0.16, n=2)
-
-fig7 = plt.figure(figsize=(11, 4.2))
-ax7a = fig7.add_subplot(1, 2, 1)
-ax7b = fig7.add_subplot(1, 2, 2, projection='3d')
-cf7 = ax7a.contourf(X7, Y7, Z7, levels=20, cmap='viridis')
-plt.colorbar(cf7, ax=ax7a)
-ax7a.contour(X7, Y7, Z7, levels=[0.5, 1.0], colors=['white', 'black'], linewidths=[2.0, 1.0])
-for poly in convex_components:
-    draw_polygon_outline(poly, ax=ax7a, linestyle=':', color='0.55', linewidth=0.8,
-                         marker='o', markersize=3)
-ax7a.set_title('Composed contour from convex parts')
-ax7b.plot_wireframe(X7, Y7, Z7, rstride=5, cstride=5, color='0.35', linewidth=0.45)
-ax7b.set_xlabel('x')
-ax7b.set_ylabel('y')
-ax7b.set_zlabel('sum')
-ax7b.view_init(elev=28, azim=-58)
-ax7b.set_title('Composed wireframe surface')
-fig7.suptitle('Freeform-like shape as composed convex implicit fields', fontsize=13)
-plt.tight_layout()
-fig7.canvas.manager.set_window_title("Demo — Composed freeform from convex components")
-
 # ============================================================================
 # 2. POLYGONS WITH HOLES
 # ============================================================================
@@ -247,7 +242,7 @@ for ax, d in zip(axes10.ravel(), (0.08, 0.15, 0.28, 0.40)):
     Z = imp_spline_2d(X, Y, outer_loop, delta=d, n=2)
     Z = Z * (1.0 - imp_spline_2d(X, Y, inner_loop, delta=d, n=2))
     Z = np.clip(Z, 0.0, 1.0)
-    ax.contour(X, Y, Z, levels=[0.5], colors='k', linewidths=0.85)
+    _safe_contour(ax, X, Y, Z, levels=[0.5], colors='k', linewidths=0.85)
     draw_polygon_outline(outer_loop, ax=ax, linestyle=':', color='0.65', linewidth=0.8,
                          marker='*', markersize=5)
     draw_polygon_outline(inner_loop, ax=ax, linestyle=':', color='0.45', linewidth=0.8,
@@ -258,64 +253,300 @@ plt.tight_layout()
 fig10.canvas.manager.set_window_title("Demo — Polygon with hole delta panel")
 
 # ============================================================================
-# 3. COLLECTION OF POLYGONS FORMING A 2D PARTITION
+# 3. CONCAVE POLYGON VIA CONVEX DECOMPOSITION  (Section 7)
 # ============================================================================
-print("Category 3: collections of polygons forming a 2D partition")
+# ── Why CCW order alone is insufficient ──────────────────────────────────────
+#
+# ``imp_spline_2d`` computes a *product* of smooth half-plane fields, one per
+# edge.  At a reflex vertex the interior is on the "wrong" side of one of the
+# adjacent half-planes, so the product is 0 there even though the point is
+# inside the polygon.  Reordering vertices to CCW corrects the *winding* but
+# cannot repair this topological deficiency.
+#
+# The correct representation uses a *convex decomposition*:
+#   1. Express the concave polygon as a union of convex pieces.
+#   2. Evaluate ``imp_spline_2d`` on each convex piece.
+#   3. Combine with the bounded smooth union  B = 1 − ∏_k (1 − B_k),
+#      implemented by ``convex_decomp_field``.
+#      This formula stays in [0, 1] (unlike a raw sum), maps to 0 outside
+#      all pieces, and to ≈ 1 deep inside any piece.
+# ─────────────────────────────────────────────────────────────────────────────
+print("Category 3: concave polygon via convex decomposition")
 
-# Example 11: Convex-cell partition and aggregate cell-field surfaces
-print("  Example 11: convex-cell partition net and aggregate cell-field surfaces")
-x_nodes = np.linspace(-1.2, 1.2, 4)
-y_nodes = np.linspace(-1.2, 1.2, 4)
-partition_polygons = []
-for i in range(len(x_nodes) - 1):
-    for j in range(len(y_nodes) - 1):
-        x0, x1 = x_nodes[i], x_nodes[i + 1]
-        y0, y1 = y_nodes[j], y_nodes[j + 1]
-        partition_polygons.append(np.array([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], dtype=float))
+# Canonical concave example: L-shaped polygon.
+# Vertices are listed explicitly in counter-clockwise (CCW) boundary order.
+#
+#   (0,2)──(1,2)
+#   │       │
+#   │  P2   │   ← upper 1×1 square
+#   │       │
+#   (0,1)──(1,1)──(2,1)
+#   │               │
+#   │     P1        │   ← lower 2×1 rectangle
+#   │               │
+#   (0,0)──────────(2,0)
+#
+P_concave = np.array([
+    [0.0, 0.0],   # P0: bottom-left
+    [2.0, 0.0],   # P1: bottom-right
+    [2.0, 1.0],   # P2: right-mid (reflex-adjacent)
+    [1.0, 1.0],   # P3: inner corner  ← reflex vertex of the concave boundary
+    [1.0, 2.0],   # P4: top-right
+    [0.0, 2.0],   # P5: top-left
+], dtype=float)
 
-fig11 = partition_basis_surfaces(partition_polygons, deltas=(0.05, 0.10, 0.20), n=2, N=160)
-fig11.suptitle("Convex-cell partition: net and unnormalized sums of cell fields", fontsize=13)
+# ── Orientation check ────────────────────────────────────────────────────────
+_area_concave = polygon_signed_area(P_concave)
+assert _area_concave > 0, (
+    f"P_concave must be in CCW order (positive signed area); got {_area_concave:.6f}"
+)
+print(f"  CCW check: signed area of L-shape = {_area_concave:.2f} > 0  ✓")
+
+# Convex decomposition: two axis-aligned convex pieces that tile the L-shape
+# exactly without gaps or overlaps.
+P_lower = np.array([[0, 0], [2, 0], [2, 1], [0, 1]], dtype=float)  # lower 2×1 rectangle
+P_upper = np.array([[0, 1], [1, 1], [1, 2], [0, 2]], dtype=float)  # upper 1×1 square
+_decomp = [P_lower, P_upper]
+
+# ── Evaluate composed field ──────────────────────────────────────────────────
+all_pts7 = np.vstack([P_concave, P_lower, P_upper])
+X7, Y7 = make_grid(all_pts7, N=N_GRID, pad_fraction=0.22)
+Z7 = convex_decomp_field(X7, Y7, _decomp, delta=DELTA, n=N_ORDER)
+
+# Verify bounded smooth union stays in [0, 1]
+_z7min, _z7max = float(Z7.min()), float(Z7.max())
+assert _z7min >= -1e-14, f"Composed field below 0: min={_z7min:.6e}"
+assert _z7max <= 1.0 + 1e-14, f"Composed field above 1: max={_z7max:.6e}"
+print(f"  Composed field range: [{_z7min:.6f}, {_z7max:.6f}]  ⊆ [0, 1]  ✓")
+
+# ── Figure: 3-panel — contour / decomposition edges / 3-D surface ────────────
+print("  Example 7: L-shape concave polygon via convex decomposition")
+fig7 = plt.figure(figsize=(14, 4.8))
+ax7a = fig7.add_subplot(1, 3, 1)   # filled contour with CCW boundary
+ax7b = fig7.add_subplot(1, 3, 2)   # decomposition edges
+ax7c = fig7.add_subplot(1, 3, 3, projection='3d')
+
+# — Panel (a): composed field contour —
+cf7 = ax7a.contourf(X7, Y7, Z7, levels=20, cmap='viridis', vmin=0, vmax=1)
+plt.colorbar(cf7, ax=ax7a, label='B(x,y)')
+_safe_contour(ax7a, X7, Y7, Z7, levels=[0.5], colors='white', linewidths=2)
+# Draw the original CCW boundary prominently
+_Pc = np.vstack([P_concave, P_concave[0]])
+ax7a.plot(_Pc[:, 0], _Pc[:, 1], 'r-', linewidth=2.5, label='CCW boundary')
+ax7a.plot(P_concave[:, 0], P_concave[:, 1], 'rs', markersize=7, zorder=5)
+ax7a.set_aspect('equal')
+ax7a.set_xlabel('x')
+ax7a.set_ylabel('y')
+ax7a.set_title(rf'(a) composed field  $\delta={DELTA}$')
+ax7a.legend(fontsize=8, loc='upper right')
+
+# — Panel (b): decomposition edges overlaid on the field —
+ax7b.contourf(X7, Y7, Z7, levels=20, cmap='viridis', alpha=0.55, vmin=0, vmax=1)
+ax7b.plot(_Pc[:, 0], _Pc[:, 1], 'r-', linewidth=2.5, label='CCW boundary', zorder=4)
+for lbl, piece, ls in [('lower piece', P_lower, '--'), ('upper piece', P_upper, ':')]:
+    _p = np.vstack([piece, piece[0]])
+    ax7b.plot(_p[:, 0], _p[:, 1], color='royalblue', linestyle=ls,
+              linewidth=1.8, label=lbl, zorder=3)
+ax7b.set_aspect('equal')
+ax7b.set_xlabel('x')
+ax7b.set_ylabel('y')
+ax7b.set_title('(b) decomposition edges')
+ax7b.legend(fontsize=7, loc='upper right')
+
+# — Panel (c): 3-D wireframe of the composed field —
+ax7c.plot_wireframe(X7, Y7, Z7, rstride=6, cstride=6, color='0.35', linewidth=0.45)
+ax7c.set_xlabel('x')
+ax7c.set_ylabel('y')
+ax7c.set_zlabel('B(x,y)')
+ax7c.set_zlim(0.0, 1.05)
+ax7c.view_init(elev=28, azim=-58)
+ax7c.set_title('(c) surface')
+
+fig7.suptitle(
+    r'Concave polygon (L-shape, CCW) via convex decomposition'
+    '\n'
+    r'$B = 1-(1-B_\mathrm{lower})(1-B_\mathrm{upper})$'
+    rf',  $\delta={DELTA}$,  $n={N_ORDER}$',
+    fontsize=12,
+)
 plt.tight_layout()
-fig11.canvas.manager.set_window_title("Demo — Convex-cell partition and aggregate fields")
+fig7.canvas.manager.set_window_title("Demo — Concave polygon: convex decomposition")
 
-# Example 12: Individual partition-cell basis gallery
-print("  Example 12: basis gallery for selected partition cells")
-fig12, axes12 = plt.subplots(2, 2, figsize=(10.5, 8.0), squeeze=False)
-selected_cells = [partition_polygons[0], partition_polygons[1], partition_polygons[4], partition_polygons[8]]
-for idx, (ax, poly) in enumerate(zip(axes12.ravel(), selected_cells), start=1):
-    draw_imp_spline(poly, delta=0.12, n=2, N=260, ax=ax,
-                    title=f"Partition cell {idx}")
-fig12.suptitle("Cell-wise implicit fields on selected convex partition cells", fontsize=13)
+# ── Figure: delta-evolution panel for the concave L-shape ────────────────────
+print("  Example 7b: delta panel for concave L-shape")
+_deltas7 = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40)
+fig7b, axes7b = plt.subplots(2, 3, figsize=(13, 8.5), squeeze=False)
+for _ax, _d in zip(axes7b.ravel(), _deltas7):
+    _Z = convex_decomp_field(X7, Y7, _decomp, delta=_d, n=N_ORDER)
+    _ax.contourf(X7, Y7, _Z, levels=20, cmap='viridis', alpha=0.75, vmin=0, vmax=1)
+    _safe_contour(_ax, X7, Y7, _Z, levels=[0.5], colors='k', linewidths=1.3)
+    _ax.plot(_Pc[:, 0], _Pc[:, 1], 'r-', linewidth=1.8, label='CCW boundary')
+    _ax.set_aspect('equal')
+    _ax.set_xlabel('x')
+    _ax.set_ylabel('y')
+    _ax.set_title(rf'$\delta={_d}$')
+fig7b.suptitle(
+    r'Concave polygon (L-shape): composed field for increasing $\delta$'
+    '\n'
+    r'$B = 1-(1-B_\mathrm{lower})(1-B_\mathrm{upper})$',
+    fontsize=12,
+)
 plt.tight_layout()
-fig12.canvas.manager.set_window_title("Demo — Partition cell basis gallery")
+fig7b.canvas.manager.set_window_title("Demo — Concave polygon delta panel")
 
-# Example 13: Aggregate contour and wireframe over the partition cells
-print("  Example 13: aggregate field over all partition cells (unnormalized sum)")
-all_pts = np.vstack(partition_polygons)
-Xc, Yc = make_grid(all_pts, N=320, pad_fraction=0.08)
-Zc = np.zeros_like(Xc)
-for poly in partition_polygons:
-    Zc += imp_spline_2d(Xc, Yc, poly, delta=0.16, n=2)
+# ============================================================================
+# 4. COLLECTIONS OF POLYGONS FORMING A 2D PARTITION  (Section 9)
+# ============================================================================
+# ── Why a raw sum is not a partition of unity ─────────────────────────────────
+# For non-overlapping cells, B_k = 0 on every cell boundary (the field
+# transitions from 1 to 0 over a band of width delta near each edge).  Near
+# shared edges, adjacent cells each have B_k < 1, so their raw sum is < 1
+# there.  The unnormalized aggregate sum is *not* a partition of unity.
+#
+# The normalized basis  B̂_k = B_k / max(Σ_j B_j, ε)  satisfies
+# Σ_k B̂_k = 1 exactly wherever Σ_j B_j > ε, which is every interior point
+# of the partition domain.
+# ─────────────────────────────────────────────────────────────────────────────
+print("\nCategory 4: collections of polygons forming a 2D partition")
 
-fig13 = plt.figure(figsize=(11, 4.2))
+# Irregular convex-cell partition of [0, 3] × [0, 2].
+# Four convex quadrilateral cells sharing a non-axis-aligned interior boundary.
+#
+#  (0,2)──────────(1.5,2)──────────(3,2)
+#   │                │                │
+#   │  cell TL      /   cell TR       │
+#   │              /                  │
+#  (0,1)──────(1.2,1)──────────────(3,1)
+#   │              \                  │
+#   │  cell BL      \   cell BR       │
+#   │                \                │
+#  (0,0)──────────(1.5,0)──────────(3,0)
+#
+# Shared interior diagonal: (1.5,0)→(1.2,1)→(1.5,2)
+partition_cells = [
+    # Bottom-left trapezoid  (CCW)
+    np.array([[0.0, 0.0], [1.5, 0.0], [1.2, 1.0], [0.0, 1.0]], dtype=float),
+    # Bottom-right trapezoid  (CCW)
+    np.array([[1.5, 0.0], [3.0, 0.0], [3.0, 1.0], [1.2, 1.0]], dtype=float),
+    # Top-left trapezoid  (CCW)
+    np.array([[0.0, 1.0], [1.2, 1.0], [1.5, 2.0], [0.0, 2.0]], dtype=float),
+    # Top-right trapezoid  (CCW)
+    np.array([[1.2, 1.0], [3.0, 1.0], [3.0, 2.0], [1.5, 2.0]], dtype=float),
+]
+
+# Verify all partition cells are CCW
+for _k, _cell in enumerate(partition_cells):
+    _area_k = polygon_signed_area(_cell)
+    assert _area_k > 0, (
+        f"Partition cell {_k} is not in CCW order (signed area = {_area_k:.4f})"
+    )
+print(f"  All {len(partition_cells)} partition cells verified CCW  ✓")
+
+DELTA_PART = 0.15
+_all_cell_pts = np.vstack(partition_cells)
+X_part, Y_part = make_grid(_all_cell_pts, N=220, pad_fraction=0.08)
+
+# ── Example 11: partition net + normalized-basis sum surfaces ─────────────────
+print("  Example 11: partition net and normalized basis surfaces")
+fig11 = partition_basis_surfaces(
+    partition_cells,
+    deltas=(0.05, 0.12, 0.25),
+    n=N_ORDER,
+    N=180,
+)
+fig11.suptitle(
+    r"Irregular convex-cell partition: normalized basis sum  $\sum_k\hat{B}_k$"
+    "\n"
+    r"$\hat{B}_k = B_k\,/\,\max(\sum_j B_j,\,\varepsilon)$  —  sum $\equiv$ 1"
+    r" over partition interior",
+    fontsize=12,
+)
+plt.tight_layout()
+fig11.canvas.manager.set_window_title("Demo — Normalized partition basis surfaces")
+
+# ── Example 12: individual normalized-basis gallery ───────────────────────────
+print("  Example 12: normalized basis function gallery for each cell")
+_basis_gal, _raw_sum_gal = partition_basis_normalized(
+    partition_cells, X_part, Y_part, delta=DELTA_PART, n=N_ORDER
+)
+fig12, axes12 = plt.subplots(2, 2, figsize=(10.5, 8.2), squeeze=False)
+for _idx, (_ax12, _Bk) in enumerate(zip(axes12.ravel(), _basis_gal), start=1):
+    cf12 = _ax12.contourf(X_part, Y_part, _Bk, levels=20, cmap='viridis',
+                          vmin=0.0, vmax=1.0)
+    plt.colorbar(cf12, ax=_ax12)
+    _safe_contour(_ax12, X_part, Y_part, _Bk, levels=[0.5], colors='white', linewidths=1.5)
+    draw_polygon_outline(partition_cells[_idx - 1], ax=_ax12, linestyle='--',
+                         color='r', linewidth=1.5, marker='o', markersize=4)
+    _ax12.set_aspect('equal')
+    _ax12.set_xlabel('x')
+    _ax12.set_ylabel('y')
+    _ax12.set_title(
+        rf"Normalized basis $\hat{{B}}_{_idx}$  ($\delta={DELTA_PART}$)"
+    )
+fig12.suptitle(
+    rf"Normalized partition-basis functions  $\delta={DELTA_PART}$"
+    "\n"
+    r"Each $\hat{B}_k = B_k\,/\,\sum_j B_j$;  by construction $\sum_k\hat{B}_k = 1$",
+    fontsize=12,
+)
+plt.tight_layout()
+fig12.canvas.manager.set_window_title("Demo — Normalized partition basis gallery")
+
+# ── Example 13: partition-of-unity numerical verification ────────────────────
+print("  Example 13: partition-of-unity numerical check")
+_basis_check, _raw_sum_check = partition_basis_normalized(
+    partition_cells, X_part, Y_part, delta=DELTA_PART, n=N_ORDER
+)
+_Z_sum = sum(_basis_check)
+
+# Report max |Σ B̂_k − 1| over the interior (exclude outer boundary strip)
+_interior = (
+    (X_part > 0.15) & (X_part < 2.85) &
+    (Y_part > 0.15) & (Y_part < 1.85) &
+    (_raw_sum_check > 1e-6)            # exclude points outside all cells
+)
+_max_err = float(np.max(np.abs(_Z_sum[_interior] - 1.0))) if _interior.any() else 0.0
+_status = "✓ within tolerance" if _max_err < 1e-9 else "⚠ exceeds expected tolerance"
+print(
+    f"    Partition-of-unity (δ={DELTA_PART}):  "
+    f"max|Σ B̂_k − 1| = {_max_err:.2e}  {_status}"
+)
+
+fig13 = plt.figure(figsize=(11, 4.5))
 ax13a = fig13.add_subplot(1, 2, 1)
 ax13b = fig13.add_subplot(1, 2, 2, projection='3d')
-cf13 = ax13a.contourf(Xc, Yc, Zc, levels=20, cmap='viridis')
-plt.colorbar(cf13, ax=ax13a)
-ax13a.contour(Xc, Yc, Zc, levels=[0.5, 1.0], colors=['white', 'black'], linewidths=[2.0, 1.0])
-for poly in partition_polygons:
-    draw_polygon_outline(poly, ax=ax13a, linestyle=':', color='0.55', linewidth=0.8,
-                         marker='o', markersize=3)
-ax13a.set_title('Aggregate contour field (sum over cells)')
-ax13b.plot_wireframe(Xc, Yc, Zc, rstride=5, cstride=5, color='0.35', linewidth=0.45)
+
+cf13 = ax13a.contourf(
+    X_part, Y_part, _Z_sum, levels=np.linspace(0.8, 1.2, 25),
+    cmap='RdYlGn', vmin=0.8, vmax=1.2, extend='both',
+)
+plt.colorbar(cf13, ax=ax13a, label=r'$\sum_k\hat{B}_k$')
+for _cell in partition_cells:
+    draw_polygon_outline(_cell, ax=ax13a, linestyle=':', color='0.5',
+                         linewidth=0.9, marker='o', markersize=3)
+ax13a.set_aspect('equal')
+ax13a.set_xlabel('x')
+ax13a.set_ylabel('y')
+ax13a.set_title(r'Normalized sum $\sum_k\hat{B}_k$ (= 1 in interior)')
+
+ax13b.plot_wireframe(X_part, Y_part, _Z_sum,
+                     rstride=5, cstride=5, color='0.35', linewidth=0.45)
 ax13b.set_xlabel('x')
 ax13b.set_ylabel('y')
-ax13b.set_zlabel('sum')
+ax13b.set_zlabel(r'$\sum_k\hat{B}_k$')
+ax13b.set_zlim(0.0, 1.05)
 ax13b.view_init(elev=28, azim=-58)
-ax13b.set_title('Aggregate wireframe surface')
-fig13.suptitle('Convex-cell partition: aggregate implicit field (not normalized)', fontsize=13)
+ax13b.set_title(rf'Sum surface   max|sum−1|={_max_err:.1e}')
+
+fig13.suptitle(
+    rf"Partition-of-unity verification  ($\delta={DELTA_PART}$)"
+    "\n"
+    rf"max$|\sum_k\hat{{B}}_k - 1|$ = {_max_err:.2e} over interior",
+    fontsize=12,
+)
 plt.tight_layout()
-fig13.canvas.manager.set_window_title("Demo — Partition aggregate field")
+fig13.canvas.manager.set_window_title("Demo — Partition of unity verification")
 
 print("\nDemo complete.")
 plt.show()
+

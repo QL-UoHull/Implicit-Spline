@@ -304,3 +304,164 @@ def imp_spline_2d(x, y, P, delta: float = 0.1, n: int = 2) -> np.ndarray:
         f = f * H(L_i, delta, n)
 
     return f
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Composition helpers for concave polygons and polygon partitions
+# ──────────────────────────────────────────────────────────────────────────────
+
+def smooth_union(a, b) -> np.ndarray:
+    """Bounded smooth union of two implicit fields.
+
+    Computes ``1 - (1 - a) * (1 - b)``, which satisfies:
+
+    * Result lies in ``[0, 1]`` whenever both inputs lie in ``[0, 1]``.
+    * ``smooth_union(0, b) == b`` and ``smooth_union(a, 0) == a``.
+    * ``smooth_union(1, b) == 1`` for any *b*.
+
+    This is the standard "product-of-complements" composition used to combine
+    implicit fields from a convex decomposition without exceeding 1.
+
+    Parameters
+    ----------
+    a, b : array-like
+        Input implicit fields.  Values should be in ``[0, 1]``.
+
+    Returns
+    -------
+    numpy.ndarray
+        Composed field in ``[0, 1]``.  Same shape as *a* and *b*.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> smooth_union(np.array([0.0, 0.5]), np.array([0.5, 0.5]))
+    array([0.5  , 0.75 ])
+    """
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    return 1.0 - (1.0 - a) * (1.0 - b)
+
+
+def convex_decomp_field(x, y, polygons, delta: float = 0.1, n: int = 2) -> np.ndarray:
+    """Evaluate a (concave) shape field via a bounded smooth union of convex pieces.
+
+    The shape's implicit field is:
+
+    .. math::
+
+        B(x,y) = 1 - \\prod_{k} \\bigl(1 - B_k(x,y)\\bigr)
+
+    where :math:`B_k = \\text{imp\\_spline\\_2d}(x, y, P_k, \\delta, n)` is the
+    implicit spline for convex piece *k*.
+
+    Unlike a raw sum, this bounded smooth union remains in ``[0, 1]`` for any
+    combination of piece fields (even overlapping ones), and equals 0 outside all
+    pieces and ≈ 1 deep inside any piece.
+
+    Parameters
+    ----------
+    x, y : array-like
+        Query point(s).
+    polygons : list of array-like, each shape (m_k, 2)
+        Convex polygon pieces of the decomposition.
+    delta : float
+        Transition bandwidth.  Default: 0.1.
+    n : int
+        Smoothness order.  Default: 2.
+
+    Returns
+    -------
+    numpy.ndarray
+        Implicit field values in ``[0, 1]``, same shape as *x* / *y*.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> P1 = np.array([[0,0],[2,0],[2,1],[0,1]], dtype=float)   # lower rectangle
+    >>> P2 = np.array([[0,1],[1,1],[1,2],[0,2]], dtype=float)   # upper square
+    >>> # Together they form an L-shape; point inside should be high
+    >>> float(convex_decomp_field(0.5, 0.5, [P1, P2], delta=0.05, n=2)) > 0.5
+    True
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    result = np.zeros_like(x)
+    for P in polygons:
+        B = imp_spline_2d(x, y, P, delta=delta, n=n)
+        result = smooth_union(result, B)
+    return result
+
+
+def partition_basis_normalized(
+    polygons,
+    x,
+    y,
+    delta: float = 0.1,
+    n: int = 2,
+    eps: float = 1e-12,
+):
+    """Evaluate normalized partition-basis functions for a convex-cell partition.
+
+    For a collection of non-overlapping convex polygons tiling a domain, compute
+    the raw implicit spline fields and normalize so that they sum to 1 wherever
+    the raw sum exceeds *eps*:
+
+    .. math::
+
+        \\hat{B}_k(x,y)
+            = \\frac{B_k(x,y)}{\\max\\!\\bigl(\\sum_j B_j(x,y),\\; \\varepsilon\\bigr)}
+
+    By construction, :math:`\\sum_k \\hat{B}_k = 1` at every point where the raw
+    denominator exceeds *eps*; the result is finite everywhere (no division by
+    zero).
+
+    Parameters
+    ----------
+    polygons : list of array-like, each shape (m_k, 2)
+        Non-overlapping convex cells whose union defines the partition domain.
+    x, y : array-like
+        Query point(s).
+    delta : float
+        Transition bandwidth for each cell field.  Default: 0.1.
+    n : int
+        Smoothness order.  Default: 2.
+    eps : float
+        Minimum denominator guard against division by zero.  Default: 1e-12.
+
+    Returns
+    -------
+    basis : list of numpy.ndarray
+        Normalized basis value for each cell, in ``[0, 1]``.
+    raw_sum : numpy.ndarray
+        Denominator (sum of raw fields) before normalization.  Can be
+        compared against *eps* to identify points outside the partition domain.
+
+    Notes
+    -----
+    The partition-of-unity property ``sum_k hat_B_k == 1`` holds exactly (up
+    to floating-point rounding) at any point with ``raw_sum > eps``.  Points
+    with ``raw_sum <= eps`` are outside the active region of all cells; their
+    normalized values are proportional to ``raw_sum / eps``, which is near
+    zero.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> cells = [np.array([[0,0],[1,0],[1,1],[0,1]],dtype=float),
+    ...          np.array([[1,0],[2,0],[2,1],[1,1]],dtype=float)]
+    >>> basis, raw_sum = partition_basis_normalized(cells, np.array([0.5,1.5]),
+    ...                                             np.array([0.5,0.5]), delta=0.1)
+    >>> abs(sum(basis)[0] - 1.0) < 1e-10  # sums to 1 at interior point
+    True
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    raw = [
+        imp_spline_2d(x, y, np.asarray(P, dtype=float), delta=delta, n=n)
+        for P in polygons
+    ]
+    raw_sum = sum(raw)
+    denom = np.maximum(raw_sum, eps)
+    basis = [b / denom for b in raw]
+    return basis, raw_sum

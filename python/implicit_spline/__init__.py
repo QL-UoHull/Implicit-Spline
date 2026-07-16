@@ -37,6 +37,9 @@ from .core import (
     point_imp,
     polygon_signed_area,
     imp_spline_2d,
+    smooth_union,
+    convex_decomp_field,
+    partition_basis_normalized,
 )
 from .visualization import (
     make_grid,
@@ -52,6 +55,9 @@ __all__ = [
     "point_imp",
     "polygon_signed_area",
     "imp_spline_2d",
+    "smooth_union",
+    "convex_decomp_field",
+    "partition_basis_normalized",
     "make_grid",
     "draw_imp_spline",
     "draw_surface",

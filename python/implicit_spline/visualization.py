@@ -10,7 +10,31 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-from .core import imp_spline_2d
+from .core import imp_spline_2d, partition_basis_normalized
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Internal helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _safe_contour(ax, X, Y, Z, levels, **kwargs):
+    """Draw contours only for levels that lie strictly within the data range.
+
+    Avoids the Matplotlib ``ValueError`` / ``UserWarning`` that occurs when
+    all requested levels fall outside ``[Z.min(), Z.max()]``.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+    X, Y, Z : ndarray
+    levels : sequence of float
+    **kwargs
+        Forwarded to ``ax.contour``.
+    """
+    zmin, zmax = float(Z.min()), float(Z.max())
+    valid = [lvl for lvl in levels if zmin < lvl < zmax]
+    if valid:
+        ax.contour(X, Y, Z, levels=valid, **kwargs)
 
 
 def make_grid(P, N: int = 200, pad_fraction: float = 0.2):
@@ -179,7 +203,7 @@ def draw_imp_spline(
 
     cf = ax.contourf(X, Y, Z, levels=20, cmap=cmap)
     plt.colorbar(cf, ax=ax)
-    ax.contour(X, Y, Z, levels=[iso_level], colors="white", linewidths=2)
+    _safe_contour(ax, X, Y, Z, levels=[iso_level], colors="white", linewidths=2)
 
     if show_polygon:
         P_closed = _close_polygon(P)
@@ -381,7 +405,7 @@ def panel_delta_shapes(
 
     for ax, d in zip(axes_flat, deltas):
         Z = imp_spline_2d(X, Y, P, delta=d, n=n)
-        ax.contour(X, Y, Z, levels=[iso_level], colors="k", linewidths=0.85)
+        _safe_contour(ax, X, Y, Z, levels=[iso_level], colors="k", linewidths=0.85)
         draw_polygon_outline(
             P,
             ax=ax,
@@ -416,11 +440,29 @@ def partition_basis_surfaces(
     N: int = 140,
     figsize=(11, 8),
 ):
-    """Create a paper-style 2×2 figure for a polygon partition and aggregate fields.
+    """Create a paper-style 2×2 figure for a polygon partition and normalized-basis sums.
 
-    The first panel shows the partition net.  The remaining panels show the
-    unnormalized sum of per-cell implicit fields for different smoothing
-    parameters.
+    The first panel shows the partition net.  The remaining three panels show
+    the **normalized** sum :math:`\\sum_k \\hat{B}_k` of per-cell basis
+    functions for different smoothing parameters.  Because the basis is
+    normalized, the sum equals 1 everywhere inside the partition domain.
+
+    Parameters
+    ----------
+    polygons : list of array-like, each shape (m_k, 2)
+        Non-overlapping convex polygon cells of the partition.
+    deltas : tuple of float, length 3
+        Transition bandwidths to show (one 3-D panel each).
+    n : int
+        Smoothness order.  Default: 2.
+    N : int
+        Grid resolution.  Default: 140.
+    figsize : tuple
+        Figure size.  Default: (11, 8).
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
     """
     polygons = [np.asarray(P, dtype=float) for P in polygons]
     if len(deltas) != 3:
@@ -443,17 +485,16 @@ def partition_basis_surfaces(
     X, Y = make_grid(all_pts, N=N, pad_fraction=0.10)
 
     for idx, (ax, d) in enumerate(zip(ax_surfaces, deltas), start=1):
-        Z = np.zeros_like(X, dtype=float)
-        for poly in polygons:
-            Z += imp_spline_2d(X, Y, poly, delta=d, n=n)
+        basis, raw_sum = partition_basis_normalized(polygons, X, Y, delta=d, n=n)
+        Z = sum(basis)
         ax.plot_wireframe(X, Y, Z, rstride=4, cstride=4, color="0.35", linewidth=0.45)
         ax.view_init(elev=28, azim=-58)
-        ax.set_zlim(0.0, max(1.5, float(np.nanmax(Z)) + 0.05))
+        ax.set_zlim(0.0, 1.05)
         ax.set_xlabel("x")
         ax.set_ylabel("y")
-        ax.set_zlabel("sum")
+        ax.set_zlabel(r"$\sum_k\hat{B}_k$")
         panel_label = chr(ord("a") + idx)
-        ax.set_title(rf"({panel_label}) $\delta={d}$")
+        ax.set_title(rf"({panel_label}) $\delta={d}$  [normalized sum]")
 
     plt.tight_layout()
     return fig
