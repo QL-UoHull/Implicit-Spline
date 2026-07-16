@@ -6,8 +6,10 @@ Tests for the corrected concave-polygon and partition-basis functionality.
 Covers:
 - CCW orientation of the canonical concave (L-shaped) polygon fixture.
 - Bounded smooth union: range in [0, 1] and identity properties.
-- convex_decomp_field: field bounds, interior/exterior values.
-- partition_basis_normalized: finite values, range, partition-of-unity.
+- convex_decomp_field: field bounds, interior/exterior values,
+  and correct representation of the L-shaped concave polygon.
+- partition_basis_normalized: finite values, range, partition-of-unity,
+  and normalization at cell boundaries.
 - Safe contour-level handling in visualization helpers.
 """
 
@@ -30,6 +32,12 @@ from implicit_spline.core import (
     partition_basis_normalized,
     imp_spline_2d,
 )
+
+# ── Thresholds ────────────────────────────────────────────────────────────────
+#: Minimum expected field value well inside the shape (for delta=0.05).
+INTERIOR_THRESHOLD = 0.5
+#: Maximum expected field value well outside the shape / in the concave notch.
+EXTERIOR_THRESHOLD = 0.05
 
 # ── Canonical fixtures ────────────────────────────────────────────────────────
 
@@ -132,17 +140,23 @@ class TestConvexDecompField:
     def test_interior_lower_piece(self):
         """Deep interior of lower piece should have high field value."""
         Z = float(convex_decomp_field(0.5, 0.5, [P_LOWER, P_UPPER], delta=0.05, n=2))
-        assert Z > 0.5, f"Interior of lower piece: Z={Z:.4f}, expected > 0.5"
+        assert Z > INTERIOR_THRESHOLD, (
+            f"Interior of lower piece: Z={Z:.4f}, expected > {INTERIOR_THRESHOLD}"
+        )
 
     def test_interior_upper_piece(self):
         """Deep interior of upper piece should have high field value."""
         Z = float(convex_decomp_field(0.3, 1.6, [P_LOWER, P_UPPER], delta=0.05, n=2))
-        assert Z > 0.5, f"Interior of upper piece: Z={Z:.4f}, expected > 0.5"
+        assert Z > INTERIOR_THRESHOLD, (
+            f"Interior of upper piece: Z={Z:.4f}, expected > {INTERIOR_THRESHOLD}"
+        )
 
     def test_concave_notch_exterior(self):
         """Point in the concave notch (1.5, 1.5) is outside the L-shape: Z ≈ 0."""
         Z = float(convex_decomp_field(1.5, 1.5, [P_LOWER, P_UPPER], delta=0.05, n=2))
-        assert Z < 0.05, f"Concave notch point: Z={Z:.4f}, expected < 0.05"
+        assert Z < EXTERIOR_THRESHOLD, (
+            f"Concave notch point: Z={Z:.4f}, expected < {EXTERIOR_THRESHOLD}"
+        )
 
     def test_far_exterior(self):
         """Points far outside the shape should have field ≈ 0."""
@@ -155,6 +169,27 @@ class TestConvexDecompField:
         Z_decomp = convex_decomp_field(X, Y, [P_LOWER], delta=0.1, n=2)
         Z_direct = imp_spline_2d(X, Y, P_LOWER, delta=0.1, n=2)
         np.testing.assert_allclose(Z_decomp, Z_direct, atol=1e-12)
+
+    def test_l_shape_interior_points(self):
+        """Test that representative interior points of the L-shaped P_CONCAVE have
+        high field values when evaluated via its convex decomposition."""
+        decomp = [P_LOWER, P_UPPER]
+        delta = 0.05
+        # Deep inside the horizontal arm of the L
+        Z_horiz = float(convex_decomp_field(1.5, 0.5, decomp, delta=delta, n=2))
+        assert Z_horiz > INTERIOR_THRESHOLD, (
+            f"L-shape horizontal arm: Z={Z_horiz:.4f}, expected > {INTERIOR_THRESHOLD}"
+        )
+        # Deep inside the vertical arm of the L
+        Z_vert = float(convex_decomp_field(0.3, 1.7, decomp, delta=delta, n=2))
+        assert Z_vert > INTERIOR_THRESHOLD, (
+            f"L-shape vertical arm: Z={Z_vert:.4f}, expected > {INTERIOR_THRESHOLD}"
+        )
+        # In the concave notch (outside the L-shape)
+        Z_notch = float(convex_decomp_field(1.5, 1.5, decomp, delta=delta, n=2))
+        assert Z_notch < EXTERIOR_THRESHOLD, (
+            f"L-shape notch (exterior): Z={Z_notch:.4f}, expected < {EXTERIOR_THRESHOLD}"
+        )
 
 
 # ── partition_basis_normalized ────────────────────────────────────────────────
@@ -193,6 +228,21 @@ class TestPartitionBasisNormalized:
                 f"Partition of unity violated: max|sum-1|={max_err:.3e}"
             )
 
+    def test_partition_of_unity_at_shared_boundary(self):
+        """Normalization must give sum == 1 at points on shared cell edges."""
+        # The shared boundary between top and bottom cells is at y=0.5.
+        # Pick x=0.5, y=0.5 which lies on the shared edge between cells 0 and 2.
+        x_pt = np.array([0.5])
+        y_pt = np.array([0.5])
+        basis, raw_sum = partition_basis_normalized(CELLS_2X2, x_pt, y_pt,
+                                                    delta=0.15, n=2)
+        total = float(sum(b[0] for b in basis))
+        rs = float(raw_sum[0])
+        if rs > 1e-9:
+            assert abs(total - 1.0) < 1e-10, (
+                f"Partition sum at shared boundary: {total:.6f}, expected 1.0"
+            )
+
     def test_raw_sum_non_negative(self):
         """Raw sum of cell fields must be non-negative everywhere."""
         X, Y = np.meshgrid(np.linspace(0, 2, 30), np.linspace(0, 1, 30))
@@ -201,7 +251,6 @@ class TestPartitionBasisNormalized:
 
     def test_exterior_points_zero(self):
         """Points far outside all cells should have near-zero basis values."""
-        # Far exterior point
         basis, raw_sum = partition_basis_normalized(
             CELLS_2X2,
             np.array([-5.0]),
@@ -249,3 +298,4 @@ class TestSafeContour:
         # Large delta: Z may never reach 0.99
         draw_imp_spline(P, delta=0.8, n=2, N=30, iso_level=0.99)
         plt.close('all')
+

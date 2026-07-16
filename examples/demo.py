@@ -298,7 +298,8 @@ P_concave = np.array([
 # ── Orientation check ────────────────────────────────────────────────────────
 _area_concave = polygon_signed_area(P_concave)
 assert _area_concave > 0, (
-    f"P_concave must be in CCW order (positive signed area); got {_area_concave:.6f}"
+    f"P_concave must be in CCW order (positive signed area); got {_area_concave:.6f}. "
+    "To fix, reverse the vertex order: P_concave = P_concave[::-1]"
 )
 print(f"  CCW check: signed area of L-shape = {_area_concave:.2f} > 0  ✓")
 

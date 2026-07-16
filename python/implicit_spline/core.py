@@ -442,8 +442,8 @@ def partition_basis_normalized(
     The partition-of-unity property ``sum_k hat_B_k == 1`` holds exactly (up
     to floating-point rounding) at any point with ``raw_sum > eps``.  Points
     with ``raw_sum <= eps`` are outside the active region of all cells; their
-    normalized values are proportional to ``raw_sum / eps``, which is near
-    zero.
+    normalized values equal the individual raw field divided by *eps*, which
+    is near zero for points far from the partition domain.
 
     Examples
     --------
