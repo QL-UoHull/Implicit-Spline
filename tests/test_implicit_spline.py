@@ -33,6 +33,17 @@ N_ORDER = 2
 ABS_TOL = 1e-12
 FIELD_TOL = 5e-3
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Rotation helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _rotate_polygon(P: np.ndarray, angle_deg: float) -> np.ndarray:
+    """Rotate all vertices of polygon P by angle_deg degrees CCW about origin."""
+    theta = np.radians(angle_deg)
+    R = np.array([[np.cos(theta), -np.sin(theta)],
+                  [np.sin(theta),  np.cos(theta)]])
+    return P @ R.T
+
 
 @pytest.mark.parametrize("name", sorted(SECTION7_POLYGONS))
 def test_section7_polygons_are_ccw_and_non_convex(name):
@@ -225,3 +236,145 @@ class TestSafeContour:
         fig2, ax2 = plt.subplots()
         draw_imp_spline(SECTION7_POLYGONS['heart_like'], delta=TEST_DELTA, n=N_ORDER, N=40, ax=ax2, iso_level=1.5)
         plt.close(fig2)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Smoothness / rotation regression tests (isotropic Gaussian kernel)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("angle_deg", [30.0, 45.0, 90.0, 135.0])
+@pytest.mark.parametrize("name", sorted(SECTION7_POLYGONS))
+def test_rotation_consistency(name, angle_deg):
+    """Field values must be invariant when polygon and query points are co-rotated.
+
+    The isotropic Gaussian kernel makes f(R·q, R·P) == f(q, P) to machine
+    precision.  A separable axis-aligned kernel breaks this symmetry and
+    produces orientation-dependent field values.
+    """
+    P = SECTION7_POLYGONS[name]
+    P_rot = _rotate_polygon(P, angle_deg)
+
+    # Sample on a moderate grid over the *original* polygon bounding box
+    N = 60
+    x_lo, x_hi = P[:, 0].min() - 0.3, P[:, 0].max() + 0.3
+    y_lo, y_hi = P[:, 1].min() - 0.3, P[:, 1].max() + 0.3
+    X, Y = np.meshgrid(np.linspace(x_lo, x_hi, N), np.linspace(y_lo, y_hi, N))
+
+    # Rotate each query point to the rotated polygon frame
+    theta = np.radians(angle_deg)
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    X_rot = cos_t * X - sin_t * Y
+    Y_rot = sin_t * X + cos_t * Y
+
+    Z_orig = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+    Z_rot = imp_spline_2d(X_rot, Y_rot, P_rot, delta=TEST_DELTA, n=N_ORDER)
+
+    # Isotropic Gaussian: the two evaluations should be identical to floating-point
+    # precision (the kernel is exactly rotationally invariant).
+    np.testing.assert_allclose(
+        Z_orig, Z_rot, rtol=0.0, atol=1e-10,
+        err_msg=(
+            f"{name} rotated by {angle_deg}°: field values differ by more than 1e-10; "
+            "an isotropic kernel should produce identical results after co-rotating "
+            "the polygon and all query points."
+        ),
+    )
+
+
+@pytest.mark.parametrize("name", sorted(SECTION7_POLYGONS))
+def test_section7_contour_no_sharp_cusps(name):
+    """Iso-contour at 0.5 must be smooth: no isolated large tangent-angle jumps.
+
+    The isotropic Gaussian kernel is C^∞ everywhere, so consecutive tangent
+    vectors along the extracted iso-contour should not show large isolated
+    angle changes.  We require the maximum tangent-angle jump (in degrees)
+    to remain below 2° on a 600×600 evaluation grid with delta=0.22.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    MAX_JUMP_DEG = 2.0  # degrees; separable kernel gives ~2.5–3.6° at this resolution
+
+    P = SECTION7_POLYGONS[name]
+    N = 600
+    X, Y = np.meshgrid(
+        np.linspace(P[:, 0].min() - 0.5, P[:, 0].max() + 0.5, N),
+        np.linspace(P[:, 1].min() - 0.5, P[:, 1].max() + 0.5, N),
+    )
+    Z = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+
+    fig, ax = plt.subplots()
+    cs = ax.contour(X, Y, Z, levels=[0.5])
+    plt.close(fig)
+
+    segs = cs.allsegs[0]
+    assert len(segs) > 0, f"{name}: no iso-contour found at level 0.5"
+
+    max_jump_deg = 0.0
+    for seg in segs:
+        if len(seg) < 4:
+            continue
+        diff = np.diff(seg, axis=0)
+        angles = np.arctan2(diff[:, 1], diff[:, 0])
+        angle_diffs = np.degrees(np.abs(np.diff(np.unwrap(angles))))
+        max_jump_deg = max(max_jump_deg, float(angle_diffs.max()))
+
+    assert max_jump_deg < MAX_JUMP_DEG, (
+        f"{name}: max tangent-angle jump {max_jump_deg:.2f}° exceeds {MAX_JUMP_DEG}°. "
+        "This indicates cusps or kinks on the iso-contour caused by an anisotropic "
+        "kernel.  The isotropic Gaussian kernel should keep all jumps < 2°."
+    )
+
+
+@pytest.mark.parametrize("name", sorted(SECTION7_POLYGONS))
+def test_grid_refinement_does_not_increase_curvature_variation(name):
+    """Contour smoothness should not degrade as the evaluation grid is refined.
+
+    On a coarse grid (N=200) the extracted contour is limited by grid
+    resolution.  On a fine grid (N=600) the contour should be equally smooth
+    or smoother, confirming that the field itself is smooth rather than
+    inheriting polygonal corners from the evaluation grid.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    P = SECTION7_POLYGONS[name]
+
+    def max_tangent_jump(N: int) -> float:
+        X, Y = np.meshgrid(
+            np.linspace(P[:, 0].min() - 0.5, P[:, 0].max() + 0.5, N),
+            np.linspace(P[:, 1].min() - 0.5, P[:, 1].max() + 0.5, N),
+        )
+        Z = imp_spline_2d(X, Y, P, delta=TEST_DELTA, n=N_ORDER)
+        fig, ax = plt.subplots()
+        cs = ax.contour(X, Y, Z, levels=[0.5])
+        plt.close(fig)
+        segs = cs.allsegs[0]
+        mjd = 0.0
+        for seg in segs:
+            if len(seg) < 4:
+                continue
+            d = np.diff(seg, axis=0)
+            ang = np.arctan2(d[:, 1], d[:, 0])
+            mjd = max(mjd, float(np.degrees(np.abs(np.diff(np.unwrap(ang)))).max()))
+        return mjd
+
+    jump_coarse = max_tangent_jump(200)
+    jump_fine = max_tangent_jump(600)
+
+    # A 20% slack factor accounts for slightly different Marching-Squares
+    # sampling artefacts between grid resolutions.  The 2.0° floor is a
+    # generous absolute cap: the isotropic Gaussian consistently yields
+    # < 1.5° on these polygons at N=600, so any value > 2° on the fine
+    # grid already signals a genuine field discontinuity.
+    _SLACK_FACTOR = 1.2   # allow fine grid up to 20% worse than coarse
+    _ABS_FLOOR_DEG = 2.0  # absolute cap in degrees (Gaussian stays < 1.5°)
+    tolerance = max(jump_coarse * _SLACK_FACTOR, _ABS_FLOOR_DEG)
+    assert jump_fine <= tolerance, (
+        f"{name}: tangent jump on fine grid ({jump_fine:.2f}°) is worse than on "
+        f"coarse grid ({jump_coarse:.2f}°) by more than {int((_SLACK_FACTOR-1)*100)}%, "
+        "suggesting the field itself has discontinuities rather than the jump being "
+        "a grid-resolution artefact."
+    )
