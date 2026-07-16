@@ -3,8 +3,8 @@ demo.py
 -------
 Standalone Python demonstration of the 2D Piecewise Algebraic Implicit Spline.
 
-This demo is organized around four main modeling scenarios highlighted in
-Li & Tian (2009):
+This demo extends the paper's core scenarios and is organized into four
+feature-focused sections:
 
   1. Convex polygons
   2. Concave / freeform polygons
