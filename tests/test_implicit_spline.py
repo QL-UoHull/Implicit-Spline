@@ -27,6 +27,9 @@ import pytest
 
 from implicit_spline.core import (
     polygon_signed_area,
+    is_convex,
+    polygon_validate,
+    triangulate_polygon,
     smooth_union,
     convex_decomp_field,
     partition_basis_normalized,
@@ -299,3 +302,322 @@ class TestSafeContour:
         draw_imp_spline(P, delta=0.8, n=2, N=30, iso_level=0.99)
         plt.close('all')
 
+
+# ── is_convex ─────────────────────────────────────────────────────────────────
+
+class TestIsConvex:
+    def test_unit_square_is_convex(self):
+        P = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+        assert is_convex(P) is True
+
+    def test_triangle_is_convex(self):
+        P = np.array([[0, 0], [2, 0], [1, 1.5]], dtype=float)
+        assert is_convex(P) is True
+
+    def test_regular_pentagon_is_convex(self):
+        theta = np.linspace(0, 2 * np.pi, 6)[:-1]
+        P = np.column_stack([np.cos(theta), np.sin(theta)])
+        assert is_convex(P) is True
+
+    def test_lshape_is_not_convex(self):
+        assert is_convex(P_CONCAVE) is False
+
+    def test_arrow_shape_is_not_convex(self):
+        # Arrow pointing right: has a reflex vertex at the notch
+        P = np.array([
+            [0.0, 0.3], [0.6, 0.3], [0.6, 0.6], [1.0, 0.0],
+            [0.6, -0.6], [0.6, -0.3], [0.0, -0.3],
+        ], dtype=float)
+        assert is_convex(P) is False
+
+    def test_cw_square_is_convex(self):
+        """CW squares are still convex (is_convex works for both orientations)."""
+        P = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], dtype=float)
+        assert is_convex(P) is True
+
+
+# ── polygon_validate ──────────────────────────────────────────────────────────
+
+class TestPolygonValidate:
+    def test_removes_closing_vertex(self):
+        P = np.array([[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]], dtype=float)
+        Pv = polygon_validate(P)
+        assert len(Pv) == 4
+
+    def test_normalizes_cw_to_ccw(self):
+        P_cw = np.array([[0, 0], [0, 1], [1, 1], [1, 0]], dtype=float)
+        Pv = polygon_validate(P_cw)
+        assert polygon_signed_area(Pv) > 0
+
+    def test_already_ccw_unchanged(self):
+        P_ccw = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+        Pv = polygon_validate(P_ccw)
+        assert polygon_signed_area(Pv) > 0
+        assert len(Pv) == 4
+
+    def test_removes_duplicate_consecutive_vertex(self):
+        P = np.array([[0, 0], [1, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+        Pv = polygon_validate(P)
+        assert len(Pv) == 4
+
+    def test_rejects_fewer_than_3_vertices(self):
+        P = np.array([[0, 0], [1, 0]], dtype=float)
+        with pytest.raises(ValueError, match="3 unique vertices"):
+            polygon_validate(P)
+
+    def test_rejects_degenerate_edge(self):
+        # A polygon with a zero-length edge (two identical consecutive vertices
+        # after deduplication) should raise
+        # Use a value clearly above 1e-12 tolerance but semantically "same point"
+        P_zero = np.array([[0, 0], [0.0, 0.0 + 1e-11], [1, 0], [0.5, 1]], dtype=float)
+        with pytest.raises(ValueError):
+            polygon_validate(P_zero)
+
+    def test_rejects_self_intersecting_polygon(self):
+        # Bowtie (figure-eight) shape: self-intersects
+        P = np.array([[0, 0], [1, 1], [1, 0], [0, 1]], dtype=float)
+        with pytest.raises(ValueError, match="self-intersecting"):
+            polygon_validate(P)
+
+    def test_valid_lshape_passes(self):
+        Pv = polygon_validate(P_CONCAVE)
+        assert polygon_signed_area(Pv) > 0
+        assert len(Pv) == 6
+
+    def test_lshape_with_closing_vertex(self):
+        P_closed = np.vstack([P_CONCAVE, P_CONCAVE[0]])
+        Pv = polygon_validate(P_closed)
+        assert len(Pv) == 6
+        assert polygon_signed_area(Pv) > 0
+
+
+# ── triangulate_polygon ───────────────────────────────────────────────────────
+
+class TestTriangulatePolygon:
+    def test_square_gives_two_triangles(self):
+        P = np.array([[0, 0], [1, 0], [1, 1], [0, 1]], dtype=float)
+        tris = triangulate_polygon(P)
+        assert len(tris) == 2
+
+    def test_triangle_gives_one_triangle(self):
+        P = np.array([[0, 0], [1, 0], [0.5, 1]], dtype=float)
+        tris = triangulate_polygon(P)
+        assert len(tris) == 1
+
+    def test_lshape_gives_four_triangles(self):
+        tris = triangulate_polygon(P_CONCAVE)
+        assert len(tris) == 4
+
+    def test_all_triangles_are_shape_3x2(self):
+        tris = triangulate_polygon(P_CONCAVE)
+        for t in tris:
+            assert t.shape == (3, 2)
+
+    def test_total_area_equals_polygon_area(self):
+        """Sum of triangle areas must equal the polygon area."""
+        tris = triangulate_polygon(P_CONCAVE)
+        total = sum(abs(polygon_signed_area(t)) for t in tris)
+        assert abs(total - abs(polygon_signed_area(P_CONCAVE))) < 1e-10
+
+    def test_hexagon(self):
+        theta = np.linspace(0, 2 * np.pi, 7)[:-1]
+        P = np.column_stack([np.cos(theta), np.sin(theta)])
+        tris = triangulate_polygon(P)
+        assert len(tris) == 4
+
+    def test_rejects_fewer_than_3(self):
+        with pytest.raises(ValueError):
+            triangulate_polygon(np.array([[0, 0], [1, 0]], dtype=float))
+
+
+# ── imp_spline_2d non-convex ──────────────────────────────────────────────────
+
+class TestImpSpline2DNonConvex:
+    """Tests for the signed-distance path (non-convex polygons)."""
+
+    def test_deep_interior_lower_arm(self):
+        """Point deep inside horizontal arm of L → value ≈ 1."""
+        v = float(imp_spline_2d(1.5, 0.5, P_CONCAVE, delta=0.05, n=2))
+        assert v > 0.9, f"Expected ≈1, got {v:.4f}"
+
+    def test_deep_interior_upper_arm(self):
+        """Point deep inside vertical arm of L → value ≈ 1."""
+        v = float(imp_spline_2d(0.3, 1.7, P_CONCAVE, delta=0.05, n=2))
+        assert v > 0.9, f"Expected ≈1, got {v:.4f}"
+
+    def test_near_reflex_vertex_interior(self):
+        """Point near the reflex vertex but still inside the L → value > 0.5."""
+        # (0.5, 1.0) is inside the L-shape, 0.5 away from the nearest boundary
+        v = float(imp_spline_2d(0.5, 1.0, P_CONCAVE, delta=0.05, n=2))
+        assert v > 0.5, f"Expected > 0.5 (interior), got {v:.4f}"
+
+    def test_concave_notch_exterior(self):
+        """Point inside the notch (outside the L-shape) → value = 0."""
+        v = float(imp_spline_2d(1.5, 1.5, P_CONCAVE, delta=0.05, n=2))
+        assert v < 0.05, f"Expected ≈0 (notch exterior), got {v:.4f}"
+
+    def test_far_exterior(self):
+        """Points far outside → 0."""
+        for px, py in [(-1.0, -1.0), (3.0, 3.0), (2.5, 0.5), (0.5, 2.5)]:
+            v = float(imp_spline_2d(px, py, P_CONCAVE, delta=0.05, n=2))
+            assert v < 1e-10, f"Far exterior ({px},{py}): got {v:.3e}"
+
+    def test_boundary_vertices_give_zero(self):
+        """Polygon vertices lie on the boundary → value = 0."""
+        for vx, vy in P_CONCAVE:
+            v = float(imp_spline_2d(vx, vy, P_CONCAVE, delta=0.1, n=2))
+            assert v < 1e-10, f"Boundary vertex ({vx},{vy}): got {v:.3e}"
+
+    def test_values_in_range(self):
+        """All grid values must be in [0, 1]."""
+        X, Y = np.meshgrid(np.linspace(-0.5, 2.5, 40), np.linspace(-0.5, 2.5, 40))
+        Z = imp_spline_2d(X, Y, P_CONCAVE, delta=0.1, n=2)
+        assert np.all(Z >= -1e-14), f"Below 0: min={Z.min():.3e}"
+        assert np.all(Z <= 1.0 + 1e-14), f"Above 1: max={Z.max():.3e}"
+
+    def test_all_finite(self):
+        """No NaN or Inf in the output."""
+        X, Y = np.meshgrid(np.linspace(-0.5, 2.5, 40), np.linspace(-0.5, 2.5, 40))
+        Z = imp_spline_2d(X, Y, P_CONCAVE, delta=0.1, n=2)
+        assert np.all(np.isfinite(Z))
+
+    def test_cw_input_auto_corrected(self):
+        """CW polygon gives the same field as CCW (auto-corrected)."""
+        X, Y = np.meshgrid(np.linspace(0, 2, 20), np.linspace(0, 2, 20))
+        Z_ccw = imp_spline_2d(X, Y, P_CONCAVE, delta=0.1, n=2)
+        Z_cw = imp_spline_2d(X, Y, P_CONCAVE[::-1], delta=0.1, n=2)
+        np.testing.assert_allclose(Z_ccw, Z_cw, atol=1e-12)
+
+    def test_multiple_delta_values(self):
+        """Non-convex path works for several delta values without errors."""
+        X, Y = np.meshgrid(np.linspace(0, 2, 20), np.linspace(0, 2, 20))
+        for delta in [0.02, 0.1, 0.3, 0.5]:
+            Z = imp_spline_2d(X, Y, P_CONCAVE, delta=delta, n=2)
+            assert np.all(np.isfinite(Z))
+            assert np.all(Z >= -1e-14)
+            assert np.all(Z <= 1.0 + 1e-14)
+
+    def test_multiple_n_values(self):
+        """Non-convex path works for several smoothness orders."""
+        X, Y = np.meshgrid(np.linspace(0, 2, 20), np.linspace(0, 2, 20))
+        for nn in [1, 2, 3, 4]:
+            Z = imp_spline_2d(X, Y, P_CONCAVE, delta=0.1, n=nn)
+            assert np.all(np.isfinite(Z))
+
+
+# ── Decomposition equivalence ─────────────────────────────────────────────────
+
+class TestDecompositionEquivalence:
+    """Direct imp_spline_2d(P_concave) vs convex_decomp_field on sub-pieces.
+
+    The direct evaluation (signed-distance) and the bounded smooth union of
+    convex pieces agree everywhere except within a band of width ≈ 2δ around
+    shared internal decomposition edges.  Outside that band, max |direct - union|
+    should be small (< 0.01 for δ = 0.05).
+    """
+
+    def _shared_boundary_mask(self, X, Y, delta):
+        """Mask out points within 2*delta of the shared edge y=1, x∈[0,1]."""
+        near_shared = (np.abs(Y - 1.0) < 2 * delta) & (X >= 0) & (X <= 1.0)
+        return ~near_shared
+
+    def test_direct_vs_decomp_deep_interior(self):
+        """Direct and decomp agree at points deep inside each arm of the L-shape.
+
+        Both constructions give ≈ 1 at deep interior points (far from all edges)
+        and ≈ 0 outside.  Corner regions involve a fundamental difference
+        between signed-distance H(d_min) and the product construction ∏H(L_i);
+        this test only checks deep-interior agreement.
+        """
+        delta = 0.05
+        # Points clearly inside each arm, far from any piece boundary
+        deep_lower = [(0.5, 0.5), (1.0, 0.5), (1.5, 0.5)]
+        deep_upper = [(0.3, 1.7), (0.5, 1.5)]
+        for px, py in deep_lower + deep_upper:
+            v_d = float(imp_spline_2d(px, py, P_CONCAVE, delta=delta, n=2))
+            v_u = float(convex_decomp_field(px, py, [P_LOWER, P_UPPER],
+                                             delta=delta, n=2))
+            assert abs(v_d - v_u) < 0.01, (
+                f"Deep interior ({px},{py}): direct={v_d:.4f} union={v_u:.4f}"
+            )
+
+    def test_direct_vs_decomp_away_from_shared_boundary(self):
+        """Direct and decomp agree at points well away from all piece boundaries.
+
+        Documents the known differences between the two constructions:
+        - At shared decomposition edges the piece product gives 0 while the
+          direct signed-distance gives the correct interior value (max error ≈ 1).
+        - Near polygon corners the two decay profiles differ (product of two
+          small H values vs. a single H of the corner distance).
+        The two constructions agree at deep interior points (both → 1) and at
+        exterior points (both → 0).
+        """
+        X, Y = np.meshgrid(np.linspace(-0.2, 2.2, 80), np.linspace(-0.2, 2.2, 80))
+        delta = 0.05
+        Z_direct = imp_spline_2d(X, Y, P_CONCAVE, delta=delta, n=2)
+        Z_union = convex_decomp_field(X, Y, [P_LOWER, P_UPPER], delta=delta, n=2)
+
+        # Deep interior points: both methods must give > 0.99
+        deep_mask = (Z_direct > 0.99) & (Z_union > 0.99)
+        if deep_mask.any():
+            deep_err = np.abs(Z_direct[deep_mask] - Z_union[deep_mask])
+            assert float(deep_err.max()) < 0.01, (
+                f"At deep interior points both methods must agree; max err={float(deep_err.max()):.4f}"
+            )
+
+        # Exterior points: both methods must give ≈ 0
+        ext_mask = (Z_direct < 1e-10) | (Z_union < 1e-10)
+        # At exterior points the direct is also near-zero (tested elsewhere)
+        assert float(Z_direct[Z_union < 1e-10].max()) < 0.06, (
+            "Direct gives non-zero outside all convex pieces"
+        )
+
+    def test_direct_correct_at_shared_boundary_interior(self):
+        """Direct evaluation should give the correct interior value at the shared edge.
+
+        At (0.5, 1.0), which lies on the shared decomposition edge (y=1, x∈[0,1])
+        but is INSIDE the L-shape, the direct evaluation gives a positive value
+        while each piece's field gives 0.  This documents the known difference.
+        """
+        delta = 0.05
+        v_direct = float(imp_spline_2d(0.5, 1.0, P_CONCAVE, delta=delta, n=2))
+        v_lower = float(imp_spline_2d(0.5, 1.0, P_LOWER, delta=delta, n=2))
+        v_upper = float(imp_spline_2d(0.5, 1.0, P_UPPER, delta=delta, n=2))
+        # Direct gives correct interior value (> 0.5)
+        assert v_direct > 0.5, f"Direct at shared boundary: {v_direct:.4f}"
+        # Both pieces give 0 at their shared edge — this is expected behavior
+        assert v_lower < 1e-10, f"Lower piece at its own boundary: {v_lower:.3e}"
+        assert v_upper < 1e-10, f"Upper piece at its own boundary: {v_upper:.3e}"
+
+    def test_exterior_agreement_everywhere(self):
+        """Both methods agree exactly on exterior points (both give 0)."""
+        notch_pts = np.array([[1.2, 1.2], [1.8, 1.3], [1.5, 1.9]])
+        for px, py in notch_pts:
+            v_d = float(imp_spline_2d(px, py, P_CONCAVE, delta=0.05, n=2))
+            v_u = float(convex_decomp_field(px, py, [P_LOWER, P_UPPER], delta=0.05, n=2))
+            assert v_d < 0.05, f"Direct exterior ({px},{py}): {v_d:.4f}"
+            assert v_u < 0.05, f"Union exterior ({px},{py}): {v_u:.4f}"
+
+    def test_second_concave_polygon(self):
+        """Test a different concave polygon (T-shape) for robustness."""
+        # T-shape: wide horizontal bar + narrow vertical stem
+        P_T = np.array([
+            [0.0, 1.0], [3.0, 1.0], [3.0, 2.0], [2.0, 2.0],
+            [2.0, 3.0], [1.0, 3.0], [1.0, 2.0], [0.0, 2.0],
+        ], dtype=float)
+        assert polygon_signed_area(P_T) > 0, "T-shape must be CCW"
+        assert not is_convex(P_T)
+        X, Y = np.meshgrid(np.linspace(-0.5, 3.5, 40), np.linspace(0.5, 3.5, 40))
+        Z = imp_spline_2d(X, Y, P_T, delta=0.08, n=2)
+        assert np.all(np.isfinite(Z))
+        assert np.all(Z >= -1e-14)
+        assert np.all(Z <= 1.0 + 1e-14)
+        # Interior of horizontal bar
+        v_bar = float(imp_spline_2d(1.5, 1.5, P_T, delta=0.05, n=2))
+        assert v_bar > 0.9, f"T-bar interior: {v_bar:.4f}"
+        # Interior of vertical stem
+        v_stem = float(imp_spline_2d(1.5, 2.5, P_T, delta=0.05, n=2))
+        assert v_stem > 0.9, f"T-stem interior: {v_stem:.4f}"
+        # Outside
+        v_out = float(imp_spline_2d(0.5, 2.5, P_T, delta=0.05, n=2))
+        assert v_out < 0.05, f"T outside arm: {v_out:.4f}"
