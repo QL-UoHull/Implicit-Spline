@@ -141,7 +141,7 @@ def test_polygon_with_hole_composition_still_behaves():
     assert annulus > 0.8
 
 
-def test_polygon_validate_handles_large_coordinates_without_relative_tolerance_collapsing_vertices():
+def test_polygon_validate_large_coordinates_no_vertex_collapse():
     P = np.array([
         [1_000_000.0, 1_000_000.0],
         [1_000_002.0, 1_000_000.0],
@@ -170,7 +170,15 @@ def test_polygon_validate_rejects_collinear_overlap_and_invalid_touching():
         np.array([1.0, 0.0]), np.array([3.0, 0.0]),
     ) == "overlap"
 
-    invalid_touching_polygon = np.array([[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [1.0, 1.0], [0.0, 2.0], [1.0, 0.0]], dtype=float)
+    # Non-adjacent edge 4-5 touches edge 0-1 at (1, 0), which is invalid.
+    invalid_touching_polygon = np.array([
+        [0.0, 0.0],
+        [2.0, 0.0],
+        [2.0, 2.0],
+        [1.0, 1.0],
+        [0.0, 2.0],
+        [1.0, 0.0],
+    ], dtype=float)
     with pytest.raises(ValueError, match="invalid touching edges"):
         polygon_validate(invalid_touching_polygon)
 

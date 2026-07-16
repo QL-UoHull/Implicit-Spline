@@ -14,7 +14,8 @@ import os
 import sys
 
 import matplotlib
-matplotlib.use("Agg" if os.environ.get("DISPLAY", "") == "" else matplotlib.get_backend())
+if not os.environ.get("MPLBACKEND") and os.environ.get("DISPLAY", "") == "":
+    matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 

@@ -343,7 +343,7 @@ def _gauss_legendre_rule(order: int = _DEFAULT_QUADRATURE_ORDER):
     return 0.5 * (pts + 1.0), 0.5 * weights
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=16)
 def _bspline_coefficients(order: int):
     return tuple(((-1) ** k) * comb(order, k) for k in range(order + 1))
 
@@ -536,7 +536,8 @@ def validate_partition(polygons, outer_polygon=None, *, tol: float = _DEGENERATE
 
     Checks CCW orientation, positive area, shared-edge incidence, absence of
     T-junctions, pairwise interior non-overlap, and total-area coverage of the
-    optional outer polygon.
+    optional outer polygon. The routine is intended for small/medium example
+    partitions rather than very large production meshes.
     """
     cells = [polygon_validate(P, name=f"cell[{i}]") for i, P in enumerate(polygons)]
     areas = [polygon_signed_area(P) for P in cells]
