@@ -41,6 +41,91 @@ def make_grid(P, N: int = 200, pad_fraction: float = 0.2):
     return np.meshgrid(x_lin, y_lin)
 
 
+def _close_polygon(P):
+    """Return *P* with its first vertex appended to close the loop."""
+    P = np.asarray(P, dtype=float)
+    return np.vstack([P, P[0]])
+
+
+def draw_polygon_outline(
+    P,
+    ax=None,
+    *,
+    linestyle: str = ":",
+    color: str = "0.5",
+    linewidth: float = 0.8,
+    marker: str = "o",
+    markersize: float = 2.5,
+    annotate_vertices: bool = False,
+    vertex_labels=None,
+    vertex_text_offset=(0.02, 0.02),
+    title: str | None = None,
+):
+    """Draw a polygon outline and optional vertex markers/labels.
+
+    Parameters
+    ----------
+    P : array-like, shape (m, 2)
+        Polygon vertices.
+    ax : matplotlib.axes.Axes, optional
+        Target axes.  A new figure is created if *None*.
+    linestyle, color, linewidth, marker, markersize : optional
+        Styling options passed to Matplotlib.
+    annotate_vertices : bool
+        If True, annotate each vertex.
+    vertex_labels : sequence of str, optional
+        Custom labels for each vertex.  Defaults to ``P0, P1, ...``.
+    vertex_text_offset : tuple[float, float]
+        Offset added to each label position.
+    title : str, optional
+        Axes title.
+
+    Returns
+    -------
+    ax : matplotlib.axes.Axes
+        The axes used for plotting.
+    """
+    P = np.asarray(P, dtype=float)
+    created_fig = ax is None
+    if created_fig:
+        fig, ax = plt.subplots(figsize=(5, 4))
+
+    P_closed = _close_polygon(P)
+    ax.plot(
+        P_closed[:, 0],
+        P_closed[:, 1],
+        linestyle=linestyle,
+        color=color,
+        linewidth=linewidth,
+    )
+    ax.plot(
+        P[:, 0],
+        P[:, 1],
+        linestyle="None",
+        marker=marker,
+        color=color,
+        markersize=markersize,
+    )
+
+    if annotate_vertices:
+        if vertex_labels is None:
+            vertex_labels = [f"P{i}" for i in range(len(P))]
+        dx, dy = vertex_text_offset
+        for (xv, yv), label in zip(P, vertex_labels):
+            ax.text(xv + dx, yv + dy, str(label), fontsize=8, color=color)
+
+    ax.set_aspect("equal")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    if title is not None:
+        ax.set_title(title)
+
+    if created_fig:
+        plt.tight_layout()
+
+    return ax
+
+
 def draw_imp_spline(
     P,
     delta: float = 0.1,
@@ -97,7 +182,7 @@ def draw_imp_spline(
     ax.contour(X, Y, Z, levels=[iso_level], colors="white", linewidths=2)
 
     if show_polygon:
-        P_closed = np.vstack([P, P[0]])
+        P_closed = _close_polygon(P)
         ax.plot(P_closed[:, 0], P_closed[:, 1], "r--", linewidth=1.5, label="Polygon")
         ax.plot(P[:, 0], P[:, 1], "r.", markersize=8)
 
@@ -123,6 +208,11 @@ def draw_surface(
     ax=None,
     cmap: str = "plasma",
     title: str | None = None,
+    *,
+    wireframe: bool = False,
+    elev: float | None = None,
+    azim: float | None = None,
+    zlim=None,
 ):
     """Render a 3D surface plot of the implicit spline function.
 
@@ -142,6 +232,12 @@ def draw_surface(
         Colormap.  Default: ``'plasma'``.
     title : str, optional
         Axes title.
+    wireframe : bool, optional
+        If True, draw a wireframe instead of a shaded surface.
+    elev, azim : float, optional
+        3D view angles passed to ``ax.view_init``.
+    zlim : tuple[float, float], optional
+        Explicit z-axis limits.
 
     Returns
     -------
@@ -160,8 +256,29 @@ def draw_surface(
         fig = plt.figure(figsize=(7, 5))
         ax = fig.add_subplot(111, projection="3d")
 
-    ax.plot_surface(X, Y, Z, rstride=1, cstride=1, cmap=cmap,
-                    linewidth=0, antialiased=True, alpha=0.9)
+    if wireframe:
+        ax.plot_wireframe(X, Y, Z, rstride=4, cstride=4, color="0.35", linewidth=0.5)
+    else:
+        ax.plot_surface(
+            X,
+            Y,
+            Z,
+            rstride=1,
+            cstride=1,
+            cmap=cmap,
+            linewidth=0,
+            antialiased=True,
+            alpha=0.9,
+        )
+
+    if elev is not None or azim is not None:
+        ax.view_init(
+            elev=elev if elev is not None else ax.elev,
+            azim=azim if azim is not None else ax.azim,
+        )
+    if zlim is not None:
+        ax.set_zlim(*zlim)
+
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     ax.set_zlabel("f(x,y)")
@@ -214,5 +331,129 @@ def compare_delta(
         ax.set_title(rf"$\delta = {d}$")
 
     fig.suptitle("Effect of transition bandwidth $\\delta$", fontsize=13)
+    plt.tight_layout()
+    return fig
+
+
+def compare_n(
+    P,
+    delta: float = 0.15,
+    n_values=(1, 2, 3),
+    N: int = 200,
+    iso_level: float = 0.5,
+    cmap: str = "viridis",
+):
+    """Compare the same polygon for several smoothness orders *n*."""
+    fig, axes = plt.subplots(1, len(n_values), figsize=(5 * len(n_values), 4), squeeze=False)
+    axes = axes[0]
+
+    for ax, nn in zip(axes, n_values):
+        draw_imp_spline(P, delta=delta, n=nn, N=N, ax=ax, iso_level=iso_level, cmap=cmap)
+        ax.set_title(rf"$n = {nn}$")
+
+    fig.suptitle(rf"Effect of smoothness order $n$ ($\delta={delta}$)", fontsize=13)
+    plt.tight_layout()
+    return fig
+
+
+def panel_delta_shapes(
+    P,
+    deltas,
+    *,
+    n: int = 2,
+    N: int = 300,
+    iso_level: float = 0.5,
+    layout=(2, 3),
+    title: str | None = None,
+    show_vertices: bool = True,
+    vertex_labels=None,
+):
+    """Draw paper-style contour panels for a sequence of ``delta`` values."""
+    rows, cols = layout
+    if rows * cols < len(deltas):
+        raise ValueError("layout does not provide enough subplots for all delta values")
+
+    fig, axes = plt.subplots(rows, cols, figsize=(4.3 * cols, 3.6 * rows), squeeze=False)
+    axes_flat = axes.ravel()
+
+    P = np.asarray(P, dtype=float)
+    X, Y = make_grid(P, N=N, pad_fraction=0.25)
+
+    for ax, d in zip(axes_flat, deltas):
+        Z = imp_spline_2d(X, Y, P, delta=d, n=n)
+        ax.contour(X, Y, Z, levels=[iso_level], colors="k", linewidths=0.85)
+        draw_polygon_outline(
+            P,
+            ax=ax,
+            linestyle=":",
+            color="0.65",
+            linewidth=0.8,
+            marker="*" if show_vertices else "None",
+            markersize=5.5 if show_vertices else 0,
+            annotate_vertices=False,
+        )
+        if vertex_labels is not None:
+            dx, dy = 0.025, 0.025
+            for (xv, yv), label in zip(P, vertex_labels):
+                ax.text(xv + dx, yv + dy, str(label), fontsize=7, color="0.25")
+        ax.set_title(rf"$\delta$={d}")
+        ax.grid(False)
+
+    for ax in axes_flat[len(deltas):]:
+        ax.axis("off")
+
+    if title is not None:
+        fig.suptitle(title, fontsize=13)
+    plt.tight_layout()
+    return fig
+
+
+def partition_basis_surfaces(
+    polygons,
+    deltas=(0.05, 0.10, 0.20),
+    *,
+    n: int = 2,
+    N: int = 140,
+    figsize=(11, 8),
+):
+    """Create a paper-style 2×2 figure for a polygon partition and basis surfaces.
+
+    The first panel shows the partition net.  The remaining panels show the
+    summed implicit basis surface generated by the polygons for different
+    smoothing parameters.
+    """
+    polygons = [np.asarray(P, dtype=float) for P in polygons]
+    if len(deltas) != 3:
+        raise ValueError("deltas must contain exactly three values for a 2x2 panel")
+
+    fig = plt.figure(figsize=figsize)
+    ax_net = fig.add_subplot(2, 2, 1)
+    ax_surfaces = [
+        fig.add_subplot(2, 2, 2, projection="3d"),
+        fig.add_subplot(2, 2, 3, projection="3d"),
+        fig.add_subplot(2, 2, 4, projection="3d"),
+    ]
+
+    for poly in polygons:
+        draw_polygon_outline(poly, ax=ax_net, linestyle="-", color="0.2", linewidth=0.8,
+                             marker="None", markersize=0)
+    ax_net.set_title("(a) polygon partition")
+
+    all_pts = np.vstack(polygons)
+    X, Y = make_grid(all_pts, N=N, pad_fraction=0.10)
+
+    for idx, (ax, d) in enumerate(zip(ax_surfaces, deltas), start=1):
+        Z = np.zeros_like(X, dtype=float)
+        for poly in polygons:
+            Z += imp_spline_2d(X, Y, poly, delta=d, n=n)
+        ax.plot_wireframe(X, Y, Z, rstride=4, cstride=4, color="0.35", linewidth=0.45)
+        ax.view_init(elev=28, azim=-58)
+        ax.set_zlim(0.0, max(1.5, float(np.nanmax(Z)) + 0.05))
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("sum")
+        panel_label = chr(ord("a") + idx)
+        ax.set_title(rf"({panel_label}) $\delta={d}$")
+
     plt.tight_layout()
     return fig
