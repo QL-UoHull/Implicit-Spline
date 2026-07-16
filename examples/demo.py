@@ -3,12 +3,13 @@ demo.py
 -------
 Standalone Python demonstration of the 2D Piecewise Algebraic Implicit Spline.
 
-This demo is organized around the three main modeling scenarios highlighted in
-Li & Tian (2009):
+This demo extends the paper's core scenarios and is organized into four
+feature-focused sections:
 
   1. Convex polygons
-  2. Polygons with holes
-  3. Collections of polygons forming a 2D partition
+  2. Concave / freeform polygons
+  3. Polygons with holes
+  4. Collections of polygons forming a 2D partition
 
 It also includes paper-style multi-panel figures inspired by the examples shown
 in the paper.
@@ -164,15 +165,44 @@ fig6 = panel_delta_shapes(
 fig6.canvas.manager.set_window_title("Demo — Convex polygon paper-style delta panel")
 
 # ============================================================================
-# 2. POLYGONS WITH HOLES
+# 2. CONCAVE / FREEFORM POLYGONS
 # ============================================================================
-print("Category 2: polygons with holes")
+print("Category 2: concave / freeform polygons")
 
-# Example 7: Triangle with inner triangular hole
-print("  Example 7: triangle with a hole")
+# Example 7: Concave polygon ("arrowhead")
+print("  Example 7: concave polygon")
+P_concave = np.array([
+    [-1.00, -0.62], [-0.20, -0.20], [0.15, -0.76], [1.02, -0.25],
+    [0.30, 0.02], [0.92, 0.82], [0.00, 0.40], [-0.88, 0.92], [-0.55, 0.02],
+], dtype=float)
+fig7, ax7 = plt.subplots(figsize=(6.2, 5.2))
+draw_imp_spline(P_concave, delta=0.18, n=2, N=320, ax=ax7,
+                title=r"Concave polygon ($\delta=0.18$, $n=2$)")
+fig7.canvas.manager.set_window_title("Demo — Concave polygon")
+plt.tight_layout()
+
+# Example 8: Paper-style multi-panel concave contour evolution
+print("  Example 8: concave polygon contour evolution under varying delta")
+fig8 = panel_delta_shapes(
+    P_concave,
+    deltas=(0.05, 0.10, 0.16, 0.24, 0.34, 0.46),
+    n=2,
+    N=320,
+    layout=(2, 3),
+    title="Concave polygon: contour evolution under increasing $\\delta$",
+)
+fig8.canvas.manager.set_window_title("Demo — Concave polygon delta panel")
+
+# ============================================================================
+# 3. POLYGONS WITH HOLES
+# ============================================================================
+print("Category 3: polygons with holes")
+
+# Example 9: Triangle with inner triangular hole
+print("  Example 9: triangle with a hole")
 outer_tri = np.array([[-1.10, -0.78], [-0.10, 0.72], [1.10, -0.78]], dtype=float)
 inner_tri = np.array([[-0.25, -0.36], [0.15, -0.45], [-0.10, 0.05]], dtype=float)
-fig7 = plot_polygon_with_holes(
+fig9 = plot_polygon_with_holes(
     outer_tri,
     [inner_tri],
     delta=0.12,
@@ -180,16 +210,16 @@ fig7 = plot_polygon_with_holes(
     N=320,
     title="Polygon with hole: outer triangle and inner triangular void",
 )
-fig7.canvas.manager.set_window_title("Demo — Polygon with hole: triangle")
+fig9.canvas.manager.set_window_title("Demo — Polygon with hole: triangle")
 
-# Example 8: Rounded rectangular outer boundary with two holes
-print("  Example 8: polygon with multiple holes")
+# Example 10: Rounded rectangular outer boundary with two holes
+print("  Example 10: polygon with multiple holes")
 outer_rect = np.array([
     [-1.15, -0.82], [-1.00, 0.88], [1.15, 0.92], [1.20, -0.82]
 ], dtype=float)
 left_hole = np.array([[-0.78, 0.36], [-0.48, -0.28], [0.10, 0.48]], dtype=float)
 right_hole = np.array([[0.42, -0.28], [0.98, 0.18], [1.02, -0.56]], dtype=float)
-fig8 = plot_polygon_with_holes(
+fig10 = plot_polygon_with_holes(
     outer_rect,
     [left_hole, right_hole],
     delta=0.18,
@@ -197,10 +227,10 @@ fig8 = plot_polygon_with_holes(
     N=340,
     title="Polygon with holes: outer boundary with two internal voids",
 )
-fig8.canvas.manager.set_window_title("Demo — Polygon with holes: multiple")
+fig10.canvas.manager.set_window_title("Demo — Polygon with holes: multiple")
 
-# Example 9: Outer polygon with a star-like central hole and delta sweep
-print("  Example 9: hole-shape evolution under varying delta")
+# Example 11: Outer polygon with a star-like central hole and delta sweep
+print("  Example 11: hole-shape evolution under varying delta")
 outer_loop = np.array([
     [-1.10, -0.92], [-1.12, 0.95], [1.18, 0.95], [1.20, -0.95]
 ], dtype=float)
@@ -209,10 +239,10 @@ inner_loop = np.array([
     [0.80, -0.05], [0.38, -0.28], [0.18, -0.58], [-0.12, -0.48],
     [-0.38, -0.62], [-0.68, -0.22],
 ], dtype=float)
-fig9, axes9 = plt.subplots(2, 2, figsize=(10.5, 8.2), squeeze=False)
+fig11, axes11 = plt.subplots(2, 2, figsize=(10.5, 8.2), squeeze=False)
 all_pts = np.vstack([outer_loop, inner_loop])
 X, Y = make_grid(all_pts, N=320, pad_fraction=0.18)
-for ax, d in zip(axes9.ravel(), (0.08, 0.15, 0.28, 0.40)):
+for ax, d in zip(axes11.ravel(), (0.08, 0.15, 0.28, 0.40)):
     Z = imp_spline_2d(X, Y, outer_loop, delta=d, n=2)
     Z = Z * (1.0 - imp_spline_2d(X, Y, inner_loop, delta=d, n=2))
     Z = np.clip(Z, 0.0, 1.0)
@@ -222,17 +252,17 @@ for ax, d in zip(axes9.ravel(), (0.08, 0.15, 0.28, 0.40)):
     draw_polygon_outline(inner_loop, ax=ax, linestyle=':', color='0.45', linewidth=0.8,
                          marker='*', markersize=5)
     ax.set_title(rf"$\delta$={d}")
-fig9.suptitle("Polygon with hole: implicit contour evolution under increasing $\\delta$", fontsize=13)
+fig11.suptitle("Polygon with hole: implicit contour evolution under increasing $\\delta$", fontsize=13)
 plt.tight_layout()
-fig9.canvas.manager.set_window_title("Demo — Polygon with hole delta panel")
+fig11.canvas.manager.set_window_title("Demo — Polygon with hole delta panel")
 
 # ============================================================================
-# 3. COLLECTION OF POLYGONS FORMING A 2D PARTITION
+# 4. COLLECTION OF POLYGONS FORMING A 2D PARTITION
 # ============================================================================
-print("Category 3: collections of polygons forming a 2D partition")
+print("Category 4: collections of polygons forming a 2D partition")
 
-# Example 10: Partition net and summed basis surfaces
-print("  Example 10: partition net and summed basis surfaces")
+# Example 12: Partition net and summed basis surfaces
+print("  Example 12: partition net and summed basis surfaces")
 partition_polygons = [
     np.array([[-0.95, -0.42], [-0.55,  0.10], [-0.55, -1.00]]),
     np.array([[-0.95,  0.45], [-0.55,  0.10], [-0.55,  0.85], [-0.35, 0.98], [-0.02, 0.62], [-0.32, 0.12]]),
@@ -242,21 +272,21 @@ partition_polygons = [
     np.array([[0.48, 0.12], [0.72, 0.55], [1.05, 0.42], [0.85, -0.18], [0.70, -0.30]]),
     np.array([[0.35, -0.42], [0.70, -0.30], [0.85, -0.18], [0.62, -0.92], [0.18, -0.98], [-0.15, -0.62]]),
 ]
-fig10 = partition_basis_surfaces(partition_polygons, deltas=(0.05, 0.10, 0.20), n=2, N=160)
-fig10.canvas.manager.set_window_title("Demo — Partition net and basis surfaces")
+fig12 = partition_basis_surfaces(partition_polygons, deltas=(0.05, 0.10, 0.20), n=2, N=160)
+fig12.canvas.manager.set_window_title("Demo — Partition net and basis surfaces")
 
-# Example 11: Individual partition-cell basis gallery
-print("  Example 11: basis gallery for selected partition cells")
-fig11, axes11 = plt.subplots(2, 2, figsize=(10.5, 8.0), squeeze=False)
-for idx, (ax, poly) in enumerate(zip(axes11.ravel(), partition_polygons[:4]), start=1):
+# Example 13: Individual partition-cell basis gallery
+print("  Example 13: basis gallery for selected partition cells")
+fig13, axes13 = plt.subplots(2, 2, figsize=(10.5, 8.0), squeeze=False)
+for idx, (ax, poly) in enumerate(zip(axes13.ravel(), partition_polygons[:4]), start=1):
     draw_imp_spline(poly, delta=0.12, n=2, N=260, ax=ax,
                     title=f"Partition cell {idx}")
-fig11.suptitle("Basis functions associated with individual partition polygons", fontsize=13)
+fig13.suptitle("Basis functions associated with individual partition polygons", fontsize=13)
 plt.tight_layout()
-fig11.canvas.manager.set_window_title("Demo — Partition cell basis gallery")
+fig13.canvas.manager.set_window_title("Demo — Partition cell basis gallery")
 
-# Example 12: Freeform curves from a small polygon collection
-print("  Example 12: freeform shapes from multiple polygon components")
+# Example 14: Freeform curves from a small polygon collection
+print("  Example 14: freeform shapes from multiple polygon components")
 collection_shapes = [
     np.array([[-1.00, -0.70], [-0.70, 0.20], [-0.30, 0.72], [0.05, 0.30], [-0.15, -0.62]]),
     np.array([[0.10, -0.42], [0.62, 0.20], [1.00, -0.58], [0.82, -0.88], [0.30, -0.82]]),
@@ -268,25 +298,25 @@ Zc = np.zeros_like(Xc)
 for poly in collection_shapes:
     Zc += imp_spline_2d(Xc, Yc, poly, delta=0.16, n=2)
 
-fig12 = plt.figure(figsize=(11, 4.2))
-ax12a = fig12.add_subplot(1, 2, 1)
-ax12b = fig12.add_subplot(1, 2, 2, projection='3d')
-cf12 = ax12a.contourf(Xc, Yc, Zc, levels=20, cmap='viridis')
-plt.colorbar(cf12, ax=ax12a)
-ax12a.contour(Xc, Yc, Zc, levels=[0.5, 1.0], colors=['white', 'black'], linewidths=[2.0, 1.0])
+fig14 = plt.figure(figsize=(11, 4.2))
+ax14a = fig14.add_subplot(1, 2, 1)
+ax14b = fig14.add_subplot(1, 2, 2, projection='3d')
+cf14 = ax14a.contourf(Xc, Yc, Zc, levels=20, cmap='viridis')
+plt.colorbar(cf14, ax=ax14a)
+ax14a.contour(Xc, Yc, Zc, levels=[0.5, 1.0], colors=['white', 'black'], linewidths=[2.0, 1.0])
 for poly in collection_shapes:
-    draw_polygon_outline(poly, ax=ax12a, linestyle=':', color='0.55', linewidth=0.8,
+    draw_polygon_outline(poly, ax=ax14a, linestyle=':', color='0.55', linewidth=0.8,
                          marker='o', markersize=3)
-ax12a.set_title('Combined contour field')
-ax12b.plot_wireframe(Xc, Yc, Zc, rstride=5, cstride=5, color='0.35', linewidth=0.45)
-ax12b.set_xlabel('x')
-ax12b.set_ylabel('y')
-ax12b.set_zlabel('sum')
-ax12b.view_init(elev=28, azim=-58)
-ax12b.set_title('Summed wireframe surface')
-fig12.suptitle('Collection of polygons: composed implicit field', fontsize=13)
+ax14a.set_title('Combined contour field')
+ax14b.plot_wireframe(Xc, Yc, Zc, rstride=5, cstride=5, color='0.35', linewidth=0.45)
+ax14b.set_xlabel('x')
+ax14b.set_ylabel('y')
+ax14b.set_zlabel('sum')
+ax14b.view_init(elev=28, azim=-58)
+ax14b.set_title('Summed wireframe surface')
+fig14.suptitle('Collection of polygons: composed implicit field', fontsize=13)
 plt.tight_layout()
-fig12.canvas.manager.set_window_title("Demo — Collection of polygons")
+fig14.canvas.manager.set_window_title("Demo — Collection of polygons")
 
 print("\nDemo complete.")
 plt.show()
