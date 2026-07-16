@@ -44,7 +44,6 @@ from implicit_spline import imp_spline_2d, draw_imp_spline
 from implicit_spline.visualization import (
     compare_delta,
     compare_n,
-    draw_surface,
     panel_delta_shapes,
     partition_basis_surfaces,
     draw_polygon_outline,
@@ -211,10 +210,9 @@ inner_loop = np.array([
     [-0.38, -0.62], [-0.68, -0.22],
 ], dtype=float)
 fig9, axes9 = plt.subplots(2, 2, figsize=(10.5, 8.2), squeeze=False)
+all_pts = np.vstack([outer_loop, inner_loop])
+X, Y = make_grid(all_pts, N=320, pad_fraction=0.18)
 for ax, d in zip(axes9.ravel(), (0.08, 0.15, 0.28, 0.40)):
-    loops = [outer_loop, inner_loop]
-    all_pts = np.vstack(loops)
-    X, Y = make_grid(all_pts, N=320, pad_fraction=0.18)
     Z = imp_spline_2d(X, Y, outer_loop, delta=d, n=2)
     Z = Z * (1.0 - imp_spline_2d(X, Y, inner_loop, delta=d, n=2))
     Z = np.clip(Z, 0.0, 1.0)
