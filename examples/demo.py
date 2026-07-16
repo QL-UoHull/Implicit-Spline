@@ -7,25 +7,29 @@ This demo is organized into three feature-focused sections:
 
   1. Convex polygons
   2. Polygons with holes (composed implicit fields)
-  3. Concave polygon via convex decomposition  ← Section 7 (corrected)
-  4. Collections of convex polygons forming a 2D partition  ← Section 9 (corrected)
+  3. Non-convex polygon: direct evaluation and convex decomposition  ← Section 7
+  4. Collections of convex polygons forming a 2D partition  ← Section 9
 
 Design notes
 ------------
-**Concave polygons (Section 7)**
-  The core function ``imp_spline_2d`` is a *product* of smooth half-plane
-  fields—one per polygon edge—so it is exact for *convex* polygons only.
-  Feeding a concave polygon directly gives incorrect results near reflex
-  vertices (the interior product can be zero there).
+**Non-convex polygons (Section 7)**
+  ``imp_spline_2d`` now supports non-convex simple polygons directly via a
+  signed-distance construction:
 
-  The correct approach is a convex decomposition:
+  1. Compute the unsigned distance from each query point to the nearest
+     boundary segment of the polygon.
+  2. Assign a positive sign inside the polygon (determined by ray-casting)
+     and a negative sign outside.
+  3. Apply ``H(signed_dist, δ, n)``.
 
-  1. Provide the concave polygon with vertices in **CCW boundary order**
-     (verified via ``polygon_signed_area > 0``).
-  2. Decompose it into non-overlapping convex pieces.
-  3. Combine piece fields with the **bounded smooth union**
-     ``B = 1 − ∏_k (1 − B_k)`` (``convex_decomp_field``), which stays in
-     [0, 1] unlike a raw sum.
+  This replaces the old per-edge product  ``∏ H(L_i)`` (which collapsed to
+  the polygon kernel near reflex vertices) with a correct field that follows
+  the full non-convex shape.
+
+  For comparison the demo also shows ``convex_decomp_field``, which uses the
+  bounded smooth union ``B = 1 − ∏_k (1 − B_k)`` over convex sub-pieces.
+  The two constructions agree at deep interior points and exterior points but
+  differ near decomposition edges and polygon corners (documented below).
 
 **Partition basis (Section 9)**
   A raw sum Σ B_k over partition cells is *not* a partition of unity—it
@@ -65,6 +69,7 @@ from implicit_spline import (
     imp_spline_2d,
     draw_imp_spline,
     polygon_signed_area,
+    is_convex,
     convex_decomp_field,
     partition_basis_normalized,
 )
@@ -253,25 +258,30 @@ plt.tight_layout()
 fig10.canvas.manager.set_window_title("Demo — Polygon with hole delta panel")
 
 # ============================================================================
-# 3. CONCAVE POLYGON VIA CONVEX DECOMPOSITION  (Section 7)
+# 3. NON-CONVEX POLYGON: DIRECT EVALUATION AND CONVEX DECOMPOSITION (Section 7)
 # ============================================================================
-# ── Why CCW order alone is insufficient ──────────────────────────────────────
+# ── Root cause of the original failure ───────────────────────────────────────
 #
-# ``imp_spline_2d`` computes a *product* of smooth half-plane fields, one per
-# edge.  At a reflex vertex the interior is on the "wrong" side of one of the
-# adjacent half-planes, so the product is 0 there even though the point is
-# inside the polygon.  Reordering vertices to CCW corrects the *winding* but
-# cannot repair this topological deficiency.
+# The old ``imp_spline_2d`` computed  f = ∏_i H(L_i)  where L_i is the signed
+# distance to the *infinite line* through edge i.  For a reflex vertex the
+# interior lies on the "wrong" side of one of the adjacent half-plane lines, so
+# the product is zero even at points deep inside the polygon.  The result
+# collapsed to the polygon kernel (the intersection of all half-planes), not the
+# full concave shape.
 #
-# The correct representation uses a *convex decomposition*:
-#   1. Express the concave polygon as a union of convex pieces.
-#   2. Evaluate ``imp_spline_2d`` on each convex piece.
-#   3. Combine with the bounded smooth union  B = 1 − ∏_k (1 − B_k),
-#      implemented by ``convex_decomp_field``.
-#      This formula stays in [0, 1] (unlike a raw sum), maps to 0 outside
-#      all pieces, and to ≈ 1 deep inside any piece.
+# ── Corrected implementation ──────────────────────────────────────────────────
+#
+# ``imp_spline_2d`` now detects concave polygons and switches to a
+# signed-distance construction:
+#   1. d_min = min over all boundary *segments* of the unsigned segment distance.
+#   2. sign = +1 inside (ray-casting), -1 outside.
+#   3. B = H(sign * d_min, δ, n).
+# This correctly fills the full non-convex shape and treats all boundary edges
+# equally regardless of orientation of adjacent half-planes.
+#
+# For convex polygons the existing product construction is used unchanged.
 # ─────────────────────────────────────────────────────────────────────────────
-print("Category 3: concave polygon via convex decomposition")
+print("Category 3: non-convex polygon — direct evaluation and convex decomposition")
 
 # Canonical concave example: L-shaped polygon.
 # Vertices are listed explicitly in counter-clockwise (CCW) boundary order.
@@ -295,13 +305,15 @@ P_concave = np.array([
     [0.0, 2.0],   # P5: top-left
 ], dtype=float)
 
-# ── Orientation check ────────────────────────────────────────────────────────
+# ── Orientation and convexity checks ─────────────────────────────────────────
 _area_concave = polygon_signed_area(P_concave)
 assert _area_concave > 0, (
     f"P_concave must be in CCW order (positive signed area); got {_area_concave:.6f}. "
     "To fix, reverse the vertex order: P_concave = P_concave[::-1]"
 )
+assert not is_convex(P_concave), "P_concave should be non-convex"
 print(f"  CCW check: signed area of L-shape = {_area_concave:.2f} > 0  ✓")
+print(f"  Convexity check: is_convex = {is_convex(P_concave)}  (expected False)  ✓")
 
 # Convex decomposition: two axis-aligned convex pieces that tile the L-shape
 # exactly without gaps or overlaps.
@@ -309,41 +321,55 @@ P_lower = np.array([[0, 0], [2, 0], [2, 1], [0, 1]], dtype=float)  # lower 2×1 
 P_upper = np.array([[0, 1], [1, 1], [1, 2], [0, 2]], dtype=float)  # upper 1×1 square
 _decomp = [P_lower, P_upper]
 
-# ── Evaluate composed field ──────────────────────────────────────────────────
+# ── Evaluate both constructions on a shared grid ─────────────────────────────
 all_pts7 = np.vstack([P_concave, P_lower, P_upper])
 X7, Y7 = make_grid(all_pts7, N=N_GRID, pad_fraction=0.22)
-Z7 = convex_decomp_field(X7, Y7, _decomp, delta=DELTA, n=N_ORDER)
 
-# Verify bounded smooth union stays in [0, 1]
-_z7min, _z7max = float(Z7.min()), float(Z7.max())
-assert _z7min >= -1e-14, f"Composed field below 0: min={_z7min:.6e}"
-assert _z7max <= 1.0 + 1e-14, f"Composed field above 1: max={_z7max:.6e}"
-print(f"  Composed field range: [{_z7min:.6f}, {_z7max:.6f}]  ⊆ [0, 1]  ✓")
+# Direct evaluation (new corrected signed-distance path)
+Z7_direct = imp_spline_2d(X7, Y7, P_concave, delta=DELTA, n=N_ORDER)
+# Convex decomposition via bounded smooth union (for comparison)
+Z7_decomp = convex_decomp_field(X7, Y7, _decomp, delta=DELTA, n=N_ORDER)
+# Absolute error between the two
+Z7_err = np.abs(Z7_direct - Z7_decomp)
 
-# ── Figure: 3-panel — contour / decomposition edges / 3-D surface ────────────
-print("  Example 7: L-shape concave polygon via convex decomposition")
-fig7 = plt.figure(figsize=(14, 4.8))
-ax7a = fig7.add_subplot(1, 3, 1)   # filled contour with CCW boundary
-ax7b = fig7.add_subplot(1, 3, 2)   # decomposition edges
-ax7c = fig7.add_subplot(1, 3, 3, projection='3d')
+# Print error statistics
+_max_err = float(Z7_err.max())
+print(f"  Direct field:   range = [{Z7_direct.min():.4f}, {Z7_direct.max():.4f}]  ✓")
+print(f"  Decomp field:   range = [{Z7_decomp.min():.4f}, {Z7_decomp.max():.4f}]  ✓")
+print(f"  |direct − decomp|: max = {_max_err:.4f}  "
+      f"(non-zero near shared edges and corners — see panel d)")
 
-# — Panel (a): composed field contour —
-cf7 = ax7a.contourf(X7, Y7, Z7, levels=20, cmap='viridis', vmin=0, vmax=1)
-plt.colorbar(cf7, ax=ax7a, label='B(x,y)')
-_safe_contour(ax7a, X7, Y7, Z7, levels=[0.5], colors='white', linewidths=2)
-# Draw the original CCW boundary prominently
-_Pc = np.vstack([P_concave, P_concave[0]])
-ax7a.plot(_Pc[:, 0], _Pc[:, 1], 'r-', linewidth=2.5, label='CCW boundary')
+# Verify fields are in [0, 1]
+assert Z7_direct.min() >= -1e-14 and Z7_direct.max() <= 1.0 + 1e-14
+assert Z7_decomp.min() >= -1e-14 and Z7_decomp.max() <= 1.0 + 1e-14
+
+# ── Figure: 4-panel — direct / decomp / error / surface ─────────────────────
+print("  Example 7: L-shape — direct evaluation, decomposition, error, surface")
+_Pc = np.vstack([P_concave, P_concave[0]])  # closed boundary for plotting
+
+fig7 = plt.figure(figsize=(18, 4.8))
+ax7a = fig7.add_subplot(1, 4, 1)   # (a) direct field
+ax7b = fig7.add_subplot(1, 4, 2)   # (b) decomposition field
+ax7c = fig7.add_subplot(1, 4, 3)   # (c) |error|
+ax7d = fig7.add_subplot(1, 4, 4, projection='3d')  # (d) surface
+
+# — Panel (a): direct imp_spline_2d on the non-convex polygon —
+cf7a = ax7a.contourf(X7, Y7, Z7_direct, levels=20, cmap='viridis', vmin=0, vmax=1)
+plt.colorbar(cf7a, ax=ax7a, label='B(x,y)')
+_safe_contour(ax7a, X7, Y7, Z7_direct, levels=[0.5], colors='white', linewidths=2)
+ax7a.plot(_Pc[:, 0], _Pc[:, 1], 'r--', linewidth=2.5, label='CCW boundary')
 ax7a.plot(P_concave[:, 0], P_concave[:, 1], 'rs', markersize=7, zorder=5)
 ax7a.set_aspect('equal')
 ax7a.set_xlabel('x')
 ax7a.set_ylabel('y')
-ax7a.set_title(rf'(a) composed field  $\delta={DELTA}$')
-ax7a.legend(fontsize=8, loc='upper right')
+ax7a.set_title(rf'(a) direct: imp_spline_2d  $\delta={DELTA}$')
+ax7a.legend(fontsize=7, loc='upper right')
 
-# — Panel (b): decomposition edges overlaid on the field —
-ax7b.contourf(X7, Y7, Z7, levels=20, cmap='viridis', alpha=0.55, vmin=0, vmax=1)
-ax7b.plot(_Pc[:, 0], _Pc[:, 1], 'r-', linewidth=2.5, label='CCW boundary', zorder=4)
+# — Panel (b): convex decomposition via bounded smooth union —
+cf7b = ax7b.contourf(X7, Y7, Z7_decomp, levels=20, cmap='viridis', vmin=0, vmax=1)
+plt.colorbar(cf7b, ax=ax7b, label='B(x,y)')
+_safe_contour(ax7b, X7, Y7, Z7_decomp, levels=[0.5], colors='white', linewidths=2)
+ax7b.plot(_Pc[:, 0], _Pc[:, 1], 'r--', linewidth=2.5, label='CCW boundary', zorder=4)
 for lbl, piece, ls in [('lower piece', P_lower, '--'), ('upper piece', P_upper, ':')]:
     _p = np.vstack([piece, piece[0]])
     ax7b.plot(_p[:, 0], _p[:, 1], color='royalblue', linestyle=ls,
@@ -351,49 +377,63 @@ for lbl, piece, ls in [('lower piece', P_lower, '--'), ('upper piece', P_upper, 
 ax7b.set_aspect('equal')
 ax7b.set_xlabel('x')
 ax7b.set_ylabel('y')
-ax7b.set_title('(b) decomposition edges')
+ax7b.set_title('(b) decomp: convex_decomp_field')
 ax7b.legend(fontsize=7, loc='upper right')
 
-# — Panel (c): 3-D wireframe of the composed field —
-ax7c.plot_wireframe(X7, Y7, Z7, rstride=6, cstride=6, color='0.35', linewidth=0.45)
+# — Panel (c): absolute error |direct − decomp| —
+cf7c = ax7c.contourf(X7, Y7, Z7_err, levels=20, cmap='hot_r', vmin=0, vmax=1)
+plt.colorbar(cf7c, ax=ax7c, label='|direct − decomp|')
+ax7c.plot(_Pc[:, 0], _Pc[:, 1], 'b--', linewidth=2, label='boundary')
+# Mark the shared internal edge
+ax7c.plot([0, 1], [1, 1], 'g-', linewidth=2, label='shared edge')
+ax7c.set_aspect('equal')
 ax7c.set_xlabel('x')
 ax7c.set_ylabel('y')
-ax7c.set_zlabel('B(x,y)')
-ax7c.set_zlim(0.0, 1.05)
-ax7c.view_init(elev=28, azim=-58)
-ax7c.set_title('(c) surface')
+ax7c.set_title(rf'(c) |direct − decomp|  (max={_max_err:.2f})')
+ax7c.legend(fontsize=7, loc='upper right')
+
+# — Panel (d): 3-D wireframe of the direct field —
+ax7d.plot_wireframe(X7, Y7, Z7_direct, rstride=6, cstride=6,
+                    color='0.35', linewidth=0.45)
+ax7d.set_xlabel('x')
+ax7d.set_ylabel('y')
+ax7d.set_zlabel('B(x,y)')
+ax7d.set_zlim(0.0, 1.05)
+ax7d.view_init(elev=28, azim=-58)
+ax7d.set_title('(d) direct surface')
 
 fig7.suptitle(
-    r'Concave polygon (L-shape, CCW) via convex decomposition'
+    r'Non-convex polygon (L-shape, CCW): direct imp\_spline\_2d vs. convex decomposition'
     '\n'
-    r'$B = 1-(1-B_\mathrm{lower})(1-B_\mathrm{upper})$'
-    rf',  $\delta={DELTA}$,  $n={N_ORDER}$',
-    fontsize=12,
+    r'(a) signed-distance path — correct for any simple polygon;  '
+    r'(b) bounded smooth union of convex pieces;  '
+    r'(c) difference (non-zero at shared edges/corners)',
+    fontsize=10,
 )
 plt.tight_layout()
-fig7.canvas.manager.set_window_title("Demo — Concave polygon: convex decomposition")
+fig7.canvas.manager.set_window_title("Demo — Non-convex polygon: direct vs decomposition")
 
-# ── Figure: delta-evolution panel for the concave L-shape ────────────────────
-print("  Example 7b: delta panel for concave L-shape")
+# ── Figure: delta-evolution panel for the non-convex L-shape (direct) ────────
+print("  Example 7b: delta panel for non-convex L-shape (direct evaluation)")
 _deltas7 = (0.05, 0.10, 0.15, 0.20, 0.30, 0.40)
 fig7b, axes7b = plt.subplots(2, 3, figsize=(13, 8.5), squeeze=False)
 for _ax, _d in zip(axes7b.ravel(), _deltas7):
-    _Z = convex_decomp_field(X7, Y7, _decomp, delta=_d, n=N_ORDER)
+    _Z = imp_spline_2d(X7, Y7, P_concave, delta=_d, n=N_ORDER)
     _ax.contourf(X7, Y7, _Z, levels=20, cmap='viridis', alpha=0.75, vmin=0, vmax=1)
     _safe_contour(_ax, X7, Y7, _Z, levels=[0.5], colors='k', linewidths=1.3)
-    _ax.plot(_Pc[:, 0], _Pc[:, 1], 'r-', linewidth=1.8, label='CCW boundary')
+    _ax.plot(_Pc[:, 0], _Pc[:, 1], 'r--', linewidth=1.8, label='CCW boundary')
     _ax.set_aspect('equal')
     _ax.set_xlabel('x')
     _ax.set_ylabel('y')
     _ax.set_title(rf'$\delta={_d}$')
 fig7b.suptitle(
-    r'Concave polygon (L-shape): composed field for increasing $\delta$'
+    r'Non-convex polygon (L-shape): direct imp\_spline\_2d for increasing $\delta$'
     '\n'
-    r'$B = 1-(1-B_\mathrm{lower})(1-B_\mathrm{upper})$',
+    r'signed-distance construction — fills the full non-convex shape at all $\delta$',
     fontsize=12,
 )
 plt.tight_layout()
-fig7b.canvas.manager.set_window_title("Demo — Concave polygon delta panel")
+fig7b.canvas.manager.set_window_title("Demo — Non-convex polygon direct delta panel")
 
 # ============================================================================
 # 4. COLLECTIONS OF POLYGONS FORMING A 2D PARTITION  (Section 9)

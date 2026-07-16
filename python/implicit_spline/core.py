@@ -7,6 +7,27 @@ All public functions are fully vectorised (NumPy array-in, array-out) and
 mirror the MATLAB functions in  matlab/  with identical sign conventions and
 parameter names.
 
+Polygon evaluation
+------------------
+``imp_spline_2d`` supports both **convex** and **non-convex** simple polygons:
+
+* **Convex polygons** use the per-edge product construction
+  ``f = ∏_i H(L_i, δ, n)`` (exact, unchanged from the original paper).
+* **Non-convex polygons** use a signed-distance construction:
+  the unsigned distance to the nearest polygon boundary segment is computed,
+  then signed by whether the query point is inside or outside the polygon
+  (ray-casting), and finally passed through ``H``.  This correctly handles
+  reflex vertices and produces the full shape field rather than collapsing to
+  the polygon kernel.
+
+For a non-convex polygon ``Ω`` split into non-overlapping convex sub-polygons
+``Ω_i``, the bounded smooth union ``convex_decomp_field`` gives a field that
+is numerically equivalent to the direct ``imp_spline_2d`` evaluation away from
+shared internal decomposition boundaries (within a band of width ``≈ 2δ``
+around shared edges, the constructions differ—the direct evaluation gives the
+correct non-zero interior value while the per-piece boundary-respecting
+construction necessarily gives zero at the shared edges).
+
 Reference
 ---------
 Li, Q. & Tian, J. (2009).  2D Piecewise Algebraic Splines for Implicit
@@ -207,6 +228,347 @@ def polygon_signed_area(P) -> float:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Private geometry helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _unsigned_seg_dist(x, y, x1: float, y1: float,
+                       x2: float, y2: float) -> np.ndarray:
+    """Unsigned distance from each point ``(x, y)`` to segment ``(x1,y1)→(x2,y2)``.
+
+    Clamps the foot-of-perpendicular parameter *t* to [0, 1], so the result
+    is the distance to the nearest point on the closed segment (not the
+    infinite line).
+
+    Parameters
+    ----------
+    x, y : array-like
+        Query coordinates (vectorised).
+    x1, y1, x2, y2 : float
+        Segment endpoints.
+
+    Returns
+    -------
+    numpy.ndarray
+        Non-negative distances, same shape as *x*.
+    """
+    dx = x2 - x1
+    dy = y2 - y1
+    # Use squared length to avoid sqrt; 1e-24 guards against squared-length
+    # underflow (segment shorter than ~1e-12 in each coordinate).
+    len2 = dx * dx + dy * dy
+    if len2 < 1e-24:
+        return np.sqrt((x - x1) ** 2 + (y - y1) ** 2)
+    t = np.clip(((x - x1) * dx + (y - y1) * dy) / len2, 0.0, 1.0)
+    px = x1 + t * dx
+    py = y1 + t * dy
+    return np.sqrt((x - px) ** 2 + (y - py) ** 2)
+
+
+def _point_in_polygon(x, y, P) -> np.ndarray:
+    """Boolean array: True where ``(x, y)`` is strictly inside polygon *P*.
+
+    Uses the ray-casting (even-odd) rule.  Points exactly on an edge may be
+    classified as inside or outside depending on floating-point arithmetic,
+    but those points have zero signed distance and their ``H`` value is 0
+    regardless of the inside/outside flag.
+
+    Parameters
+    ----------
+    x, y : numpy.ndarray
+        Query coordinates (same shape).
+    P : numpy.ndarray, shape (m, 2)
+        Polygon vertices (CCW or CW; orientation does not affect the result).
+
+    Returns
+    -------
+    numpy.ndarray of bool
+        Same shape as *x*.
+    """
+    inside = np.zeros(x.shape, dtype=bool)
+    m = len(P)
+    j = m - 1
+    for i in range(m):
+        xi, yi = P[i, 0], P[i, 1]
+        xj, yj = P[j, 0], P[j, 1]
+        # Ray from (x,y) in the +x direction. Horizontal edges (yi==yj) are
+        # skipped because (yi > y) != (yj > y) is False for them.
+        crosses_y = (yi > y) != (yj > y)
+        if np.any(crosses_y):
+            denom = yj - yi
+            # Safe division: denom != 0 wherever crosses_y is True.
+            x_intersect = np.where(
+                crosses_y,
+                # 1e-30: strictly below machine epsilon squared; safe divisor
+                # when crosses_y is True (denom != 0 by construction).
+                (xj - xi) * (y - yi) / np.where(np.abs(denom) < 1e-30, 1.0, denom) + xi,
+                0.0,
+            )
+            inside ^= crosses_y & (x < x_intersect)
+        j = i
+    return inside
+
+
+def _segments_properly_intersect(p1, p2, p3, p4) -> bool:
+    """True if open segments ``p1-p2`` and ``p3-p4`` properly intersect.
+
+    "Properly" means the crossing point is strictly in the interior of both
+    segments (no shared endpoints, no collinear touching).
+    """
+    r = p2 - p1
+    s = p4 - p3
+    rs = float(r[0] * s[1] - r[1] * s[0])
+    if abs(rs) < 1e-12:
+        return False
+    qp = p3 - p1
+    t = float(qp[0] * s[1] - qp[1] * s[0]) / rs
+    u = float(qp[0] * r[1] - qp[1] * r[0]) / rs
+    return 0.0 < t < 1.0 and 0.0 < u < 1.0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Public polygon utilities
+# ──────────────────────────────────────────────────────────────────────────────
+
+def is_convex(P) -> bool:
+    """Return ``True`` if polygon *P* is (weakly) convex.
+
+    Checks that all cross products of consecutive edge vectors have the same
+    sign (or are zero, indicating collinear vertices).  Works for both CW and
+    CCW orderings.
+
+    Parameters
+    ----------
+    P : array-like, shape (m, 2)
+        Polygon vertices (closed polygon; do not repeat the first vertex).
+
+    Returns
+    -------
+    bool
+        ``True`` if *P* is convex, ``False`` if it has one or more reflex
+        vertices.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> is_convex(np.array([[0,0],[1,0],[1,1],[0,1]], dtype=float))
+    True
+    >>> is_convex(np.array([[0,0],[2,0],[2,1],[1,1],[1,2],[0,2]], dtype=float))
+    False
+    """
+    P = np.asarray(P, dtype=float)
+    m = len(P)
+    sign = 0
+    for i in range(m):
+        dx1 = P[(i + 1) % m, 0] - P[i, 0]
+        dy1 = P[(i + 1) % m, 1] - P[i, 1]
+        dx2 = P[(i + 2) % m, 0] - P[(i + 1) % m, 0]
+        dy2 = P[(i + 2) % m, 1] - P[(i + 1) % m, 1]
+        cross = dx1 * dy2 - dy1 * dx2
+        if abs(cross) > 1e-12:
+            s = 1 if cross > 0 else -1
+            if sign == 0:
+                sign = s
+            elif s != sign:
+                return False
+    return True
+
+
+def polygon_validate(P, *, name: str = "P"):
+    """Validate and normalize a simple polygon.
+
+    Performs the following steps in order:
+
+    1. Remove a repeated closing vertex (``P[-1] == P[0]``).
+    2. Remove duplicate consecutive vertices.
+    3. Raise ``ValueError`` if fewer than 3 unique vertices remain.
+    4. Raise ``ValueError`` if any edge has near-zero length.
+    5. Raise ``ValueError`` if any non-adjacent edges properly intersect
+       (self-intersecting / non-simple polygon).
+    6. Normalize orientation to **counter-clockwise** (positive signed area).
+
+    Parameters
+    ----------
+    P : array-like, shape (m, 2)
+        Polygon vertices.  May include a repeated closing vertex.
+    name : str, optional
+        Name used in error messages.  Default: ``"P"``.
+
+    Returns
+    -------
+    numpy.ndarray, shape (m', 2)
+        Cleaned polygon in CCW order.  ``m' <= m``.
+
+    Raises
+    ------
+    ValueError
+        On any geometric degeneracy or self-intersection.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> P_cw = np.array([[0,0],[0,1],[1,1],[1,0]], dtype=float)   # CW square
+    >>> Pv = polygon_validate(P_cw)
+    >>> polygon_signed_area(Pv) > 0    # normalised to CCW
+    True
+    """
+    P = np.asarray(P, dtype=float)
+    if P.ndim != 2 or P.shape[1] != 2:
+        raise ValueError(
+            f"polygon_validate: {name} must be shape (m, 2), got {P.shape}."
+        )
+
+    # 1. Remove repeated closing vertex
+    if len(P) >= 2 and np.allclose(P[0], P[-1], atol=1e-12):
+        P = P[:-1]
+
+    # 2. Remove duplicate consecutive vertices
+    keep = np.ones(len(P), dtype=bool)
+    for i in range(1, len(P)):
+        if np.allclose(P[i], P[i - 1], atol=1e-12):
+            keep[i] = False
+    P = P[keep]
+
+    # 3. At least 3 unique vertices
+    if len(P) < 3:
+        raise ValueError(
+            f"polygon_validate: {name} must have at least 3 unique vertices "
+            f"(got {len(P)} after removing duplicates)."
+        )
+
+    # 4. No zero-length edges
+    m = len(P)
+    for i in range(m):
+        j = (i + 1) % m
+        dx = P[j, 0] - P[i, 0]
+        dy = P[j, 1] - P[i, 1]
+        if np.sqrt(dx * dx + dy * dy) < 1e-12:
+            raise ValueError(
+                f"polygon_validate: {name} has a zero-length edge between "
+                f"vertices {i} and {j}."
+            )
+
+    # 5. No self-intersections among non-adjacent edges
+    for i in range(m):
+        j = (i + 1) % m
+        for k in range(i + 2, m):
+            ll = (k + 1) % m
+            if ll == i:
+                continue  # adjacent edge — skip
+            if _segments_properly_intersect(P[i], P[j], P[k], P[ll]):
+                raise ValueError(
+                    f"polygon_validate: {name} is self-intersecting "
+                    f"(edges {i}-{j} and {k}-{ll} cross)."
+                )
+
+    # 6. Normalize to CCW
+    if polygon_signed_area(P) < 0:
+        P = P[::-1].copy()
+
+    return P
+
+
+def triangulate_polygon(P):
+    """Triangulate a simple polygon using the ear-clipping algorithm.
+
+    Accepts both convex and concave (non-self-intersecting) polygons.  The
+    vertices need not be in any particular order; the function normalizes to
+    CCW internally.
+
+    Parameters
+    ----------
+    P : array-like, shape (m, 2)
+        Polygon vertices.
+
+    Returns
+    -------
+    list of numpy.ndarray, each shape (3, 2)
+        Triangle vertex coordinates.  The triangulation has exactly ``m - 2``
+        triangles and covers the interior of *P* without gaps or overlaps.
+
+    Raises
+    ------
+    ValueError
+        If *P* has fewer than 3 vertices.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> P = np.array([[0,0],[2,0],[2,1],[1,1],[1,2],[0,2]], dtype=float)
+    >>> tris = triangulate_polygon(P)
+    >>> len(tris)      # 6 vertices → 4 triangles
+    4
+    """
+    P = np.asarray(P, dtype=float)
+    m = len(P)
+    if m < 3:
+        raise ValueError(
+            f"triangulate_polygon: need at least 3 vertices (got {m})."
+        )
+    if polygon_signed_area(P) < 0:
+        P = P[::-1].copy()
+
+    indices = list(range(m))
+    triangles = []
+
+    def _is_ear(idx_list, k):
+        n = len(idx_list)
+        i = idx_list[(k - 1) % n]
+        j = idx_list[k]
+        ll = idx_list[(k + 1) % n]
+        ax, ay = P[i]
+        bx, by = P[j]
+        cx, cy = P[ll]
+        # Must be a convex (left-turn) vertex in the current polygon.
+        # cross > 1e-12 excludes reflex vertices (cross < 0) AND near-collinear
+        # vertices (cross ≈ 0) which would produce degenerate zero-area triangles.
+        cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+        if cross <= 1e-12:
+            return False
+        # No other remaining vertex may lie strictly inside triangle i-j-l
+        tri = np.array([[ax, ay], [bx, by], [cx, cy]])
+        for idx_other in idx_list:
+            if idx_other in (i, j, ll):
+                continue
+            if _pt_in_tri(P[idx_other], tri):
+                return False
+        return True
+
+    def _pt_in_tri(p, tri):
+        a, b, c = tri
+        d1 = (p[0] - b[0]) * (a[1] - b[1]) - (a[0] - b[0]) * (p[1] - b[1])
+        d2 = (p[0] - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (p[1] - c[1])
+        d3 = (p[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (p[1] - a[1])
+        has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+        has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+        return not (has_neg and has_pos)
+
+    max_iters = m * m + m
+    iters = 0
+    while len(indices) > 3:
+        iters += 1
+        if iters > max_iters:
+            break
+        n = len(indices)
+        found = False
+        for k in range(n):
+            if _is_ear(indices, k):
+                i = indices[(k - 1) % n]
+                j = indices[k]
+                ll = indices[(k + 1) % n]
+                triangles.append(P[[i, j, ll]])
+                indices.pop(k)
+                found = True
+                break
+        if not found:
+            break
+
+    if len(indices) >= 3:
+        triangles.append(P[indices[:3]])
+
+    return triangles
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Main implicit-spline function
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -214,18 +576,33 @@ def imp_spline_2d(x, y, P, delta: float = 0.1, n: int = 2) -> np.ndarray:
     """2D piecewise algebraic implicit spline for polygon *P*.
 
     Evaluates the smooth implicit function at query point(s) ``(x, y)``
-    using the per-edge product construction:
+    using a construction that is correct for **both convex and non-convex**
+    simple polygons:
+
+    **Convex polygons** — per-edge product construction (original paper):
 
     .. math::
 
         f(x,y) = \\prod_{i=0}^{m-1}  H\\!\\left(L_i(x,y),\\, \\delta,\\, n\\right)
 
     where :math:`L_i` is the normalised signed distance from ``(x,y)`` to
-    edge *i* (positive on the interior side).  The result is:
+    the infinite line through edge *i* (positive on the interior side).
 
-    * ``f ≈ 1``  deep inside the polygon (all :math:`L_i \\geq \\delta`)
-    * ``f = 0``  on the polygon boundary (at least one :math:`L_i = 0`)
-    * ``f ≈ 0``  outside the polygon (at least one :math:`L_i \\leq 0`)
+    **Non-convex polygons** — signed-distance construction:
+
+    .. math::
+
+        f(x,y) = H\\!\\bigl(d_\\pm(x,y),\\, \\delta,\\, n\\bigr)
+
+    where :math:`d_\\pm` is the distance to the nearest point on any boundary
+    segment, positive inside the polygon and negative outside (determined by
+    ray-casting).  This correctly handles reflex vertices.
+
+    In both cases the result is:
+
+    * ``f ≈ 1``  deep inside the polygon
+    * ``f = 0``  on the polygon boundary
+    * ``f ≈ 0``  outside the polygon
 
     and is C^n continuous near each polygon edge.
 
@@ -254,9 +631,14 @@ def imp_spline_2d(x, y, P, delta: float = 0.1, n: int = 2) -> np.ndarray:
 
     Notes
     -----
-    The construction is exact for convex polygons.  For non-convex polygons,
-    regions near reflex vertices may receive lower values; increase *delta*
-    or use a convex decomposition.
+    Convex-polygon behavior is identical to the original implementation so
+    that all existing code relying on convex polygons is unaffected.
+
+    For the signed-distance path (non-convex), the field satisfies
+    ``B_Ω ≈ Σ_i B_{Ω_i}`` at points more than ``2δ`` from any shared
+    internal decomposition boundary; within that band the piece-wise
+    construction gives zero at shared edges while the direct evaluation
+    gives the correct interior value.
 
     Examples
     --------
@@ -266,6 +648,10 @@ def imp_spline_2d(x, y, P, delta: float = 0.1, n: int = 2) -> np.ndarray:
     array(1.)
     >>> imp_spline_2d(0.0, 0.5, P, delta=0.1, n=2)
     array(0.)
+    >>> # Non-convex L-shape: interior point near reflex vertex
+    >>> L = np.array([[0,0],[2,0],[2,1],[1,1],[1,2],[0,2]], dtype=float)
+    >>> float(imp_spline_2d(0.5, 1.0, L, delta=0.05, n=2)) > 0.5
+    True
 
     Reference
     ---------
@@ -289,21 +675,34 @@ def imp_spline_2d(x, y, P, delta: float = 0.1, n: int = 2) -> np.ndarray:
     if delta <= 0:
         raise ValueError(f"imp_spline_2d: delta must be positive (got {delta}).")
 
-    # Ensure counter-clockwise orientation so that L_i > 0 inside polygon
+    # Ensure counter-clockwise orientation
     if polygon_signed_area(P) < 0:
         P = P[::-1]
 
-    # Product of per-edge smooth step functions
-    # BUG NOTE: the original MATLAB code used an undeclared 'zz' at this
-    # point instead of the output variable; that is corrected here by using
-    # the consistently named accumulator 'f'.
-    f = np.ones_like(x)
+    if is_convex(P):
+        # ── Convex path: original per-edge product construction ──────────────
+        # Exact for convex polygons and backward-compatible with all prior code.
+        f = np.ones_like(x)
+        for i in range(m):
+            j = (i + 1) % m
+            L_i = lxy(x, y, P[i, 0], P[i, 1], P[j, 0], P[j, 1])
+            f = f * H(L_i, delta, n)
+        return f
+
+    # ── Non-convex path: signed-distance construction ────────────────────────
+    # 1. Unsigned distance to the nearest boundary segment.
+    d_min = np.full(x.shape, np.inf)
     for i in range(m):
         j = (i + 1) % m
-        L_i = lxy(x, y, P[i, 0], P[i, 1], P[j, 0], P[j, 1])
-        f = f * H(L_i, delta, n)
+        d = _unsigned_seg_dist(x, y, P[i, 0], P[i, 1], P[j, 0], P[j, 1])
+        d_min = np.minimum(d_min, d)
 
-    return f
+    # 2. Sign: positive inside, negative outside (ray-casting).
+    inside = _point_in_polygon(x, y, P)
+    signed_d = np.where(inside, d_min, -d_min)
+
+    # 3. Smooth step.
+    return H(signed_d, delta, n)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
