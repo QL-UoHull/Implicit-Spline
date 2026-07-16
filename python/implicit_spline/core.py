@@ -3,13 +3,34 @@ core.py
 -------
 Core mathematical functions for 2D piecewise algebraic implicit splines.
 
-The public evaluator ``imp_spline_2d`` uses a boundary-based additive
-construction for arbitrary simple polygons.  The field is assembled as a signed
-sum of oriented boundary-edge contributions, so internal edges in a convex
-partition cancel exactly and decomposition evaluation matches direct evaluation.
+The public evaluator ``imp_spline_2d`` uses an isotropic Gaussian boundary
+integral for arbitrary simple polygons, following the Green's theorem
+construction:
 
-Low-level helpers such as ``H`` and ``lxy`` are retained for legacy convex-only
-constructions and for compatibility with the MATLAB primitives.
+    f(x, y) = ∬_Ω K(x−x′, y−y′) dx′ dy′
+            = ∮_{∂Ω, CCW} Q(x−x′, y−y′) dy′
+
+where K is the 2D isotropic Gaussian kernel and Q its antiderivative potential:
+
+    K(Δx, Δy) = exp(−(Δx²+Δy²)/(2σ²)) / (2πσ²)
+    Q(Δx, Δy) = exp(−Δy²/(2σ²)) · Φ(−Δx/σ) / (σ√(2π))
+
+with Φ the standard normal CDF (scipy.special.ndtr).
+
+Isotropy of K ensures the 0.5 iso-curve is smooth (C^∞) at every polygon
+vertex, including reflex vertices, because the kernel contribution at any
+boundary point is determined solely by the local interior solid angle,
+independent of the polygon's orientation relative to the axes.  A separable
+(axis-aligned) kernel lacks this property and produces visible cusps at reflex
+vertices.
+
+The field is assembled as a signed sum of oriented boundary-edge contributions,
+so internal edges in any triangulation/partition cancel exactly and decomposition
+evaluation matches direct evaluation to floating-point precision.
+
+Low-level helpers such as ``H``, ``lxy``, and the box-spline functions are
+retained for legacy convex-only constructions and for compatibility with the
+MATLAB primitives.
 """
 
 from __future__ import annotations
@@ -19,6 +40,7 @@ from functools import lru_cache
 from math import comb, factorial
 
 import numpy as np
+from scipy.special import ndtr as _ndtr
 
 
 # Tolerances used throughout the geometry layer:
@@ -379,7 +401,25 @@ def _box_spline_1d_cdf(t, delta: float, n: int) -> np.ndarray:
 
 
 def _edge_contribution(x, y, p0, p1, delta: float, n: int, nodes, weights) -> np.ndarray:
-    """Evaluate one oriented boundary-edge contribution by Gauss-Legendre quadrature."""
+    """Evaluate one oriented boundary-edge contribution by Gauss-Legendre quadrature.
+
+    Uses an isotropic 2D Gaussian kernel via Green's theorem.  The ``n``
+    parameter is accepted for API compatibility but has no effect on the
+    Gaussian (which is always C^∞).  Use ``convex_product_spline_2d`` if you
+    need the polynomial-order C^n construction for convex polygons.
+
+    The potential function for the isotropic Gaussian kernel is:
+
+        Q(Δx, Δy) = exp(−Δy²/(2σ²)) · Φ(−Δx/σ) / (σ√(2π))
+
+    and the edge contribution is ∫ Q(x−x′, y−y′) dy′ along the edge.
+    Equivalently (using the identity ∮ exp(−Δy²/2σ²)/(σ√2π) dy′ = 0 on a
+    closed polygon), we compute:
+
+        −∫ Φ(Δx/σ) · exp(−Δy²/(2σ²)) / (σ√(2π)) · dy′
+
+    which avoids subtracting a closed-loop integral that is identically zero.
+    """
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     x0, y0 = float(p0[0]), float(p0[1])
@@ -389,11 +429,15 @@ def _edge_contribution(x, y, p0, p1, delta: float, n: int, nodes, weights) -> np
         return np.zeros(np.broadcast(x, y).shape, dtype=float)
 
     dx = x1 - x0
+    sigma = float(delta)
+    inv_sigma_sqrt2pi = 1.0 / (sigma * np.sqrt(2.0 * np.pi))
     contrib = np.zeros(np.broadcast(x, y).shape, dtype=float)
     for t, w in zip(nodes, weights):
         xe = x0 + t * dx
         ye = y0 + t * dy
-        contrib -= w * _box_spline_1d_cdf(x - xe, delta, n) * _box_spline_1d(y - ye, delta, n) * dy
+        Dx = x - xe
+        Dy = y - ye
+        contrib -= w * _ndtr(Dx / sigma) * np.exp(-0.5 * (Dy / sigma) ** 2) * inv_sigma_sqrt2pi * dy
     return contrib
 
 
