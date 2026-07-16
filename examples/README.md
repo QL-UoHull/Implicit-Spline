@@ -1,74 +1,47 @@
 # Examples
 
-Runnable examples are available in three forms:
-
-## Standalone Python script (`demo.py`)
-
-A self-contained demo organized by feature category, with paper-style figures
-inspired by Li & Tian (2009):
+Run the standalone demo from the repository root:
 
 ```bash
-# from the repository root
 python examples/demo.py
 ```
 
-The script includes:
+The corrected demo now focuses on the additive boundary-based construction used
+by the paper instead of the previous signed-distance / normalized-sum fallback.
 
-1. **Convex polygons** — square, triangle, pentagon, delta/smoothness sweeps, and
-   a paper-style multi-panel contour-evolution figure.
-2. **Polygons with holes** — shown explicitly as composed implicit fields:
-   outer-loop field multiplied by complements of convex inner-loop fields.
-3. **Concave polygon via convex decomposition** — the correct way to represent a
-   concave shape using `imp_spline_2d`:
-   - One explicit **L-shaped concave polygon** with vertices listed in **CCW
-     boundary order**, verified with `polygon_signed_area > 0`.
-   - The shape is represented through a **convex decomposition** (two
-     non-overlapping convex pieces tiling the L-shape).
-   - Pieces are combined with the **bounded smooth union**
-     `B = 1 − ∏_k (1 − B_k)` (`convex_decomp_field`), which stays in
-     [0, 1] unlike a raw sum.
-   - The original CCW boundary and the decomposition edges are drawn separately.
-   - A delta-evolution panel mirrors the paper-style figures.
-4. **2D polygon partition** — a valid partition-basis demonstration:
-   - Four irregular convex cells with non-axis-aligned shared boundaries tiling
-     [0, 3] × [0, 2].
-   - **Normalized basis functions** `B̂_k = B_k / max(Σ_j B_j, ε)`
-     (`partition_basis_normalized`) that satisfy partition of unity by
-     construction.
-   - Numerical diagnostic printed to stdout:
-     `max|Σ_k B̂_k − 1| = 0.00e+00` over the partition interior.
-   - Gallery of individual cell basis functions and a sum-surface verification.
+## What the demo shows
 
-### Why CCW order alone is insufficient for concave polygons
+1. **Convex polygon**
+   - standard implicit spline contour for a convex control polygon.
 
-`imp_spline_2d` computes a *product* of smooth half-plane fields — one per
-edge.  At a reflex vertex the interior lies on the "wrong" side of an adjacent
-half-plane, so the product is 0 there even though the point is geometrically
-inside the polygon.  Reordering vertices to CCW corrects the winding but
-cannot repair this topological deficiency; a convex decomposition is required.
+2. **Polygon with hole**
+   - composition of an outer polygon basis with the complement of a hole basis.
 
-### Why a raw field sum is not a partition basis
+3. **Section 7 paper-style non-convex examples**
+   - two non-convex control polygons listed in true CCW boundary order;
+   - dashed control polygon and vertex markers overlaid on the contour;
+   - contour drawn from the additive polygon basis `imp_spline_2d`;
+   - decomposition diagnostics computed from `triangulate_polygon(...)` and
+     `convex_decomp_field(...)`, where internal decomposition edges cancel.
 
-Near shared cell boundaries, all adjacent cells have B_k < 1 (the field
-transitions from 1 to 0 over a band of width δ near each edge), so their raw
-sum is less than 1 there.  Normalizing each B_k by the running sum ensures
-Σ_k B̂_k = 1 everywhere inside the partition domain.
+4. **Section 9 partition net**
+   - a conforming irregular convex-cell partition;
+   - programmatic validation via `validate_partition(...)`;
+   - additive basis identity `sum_k B_k = B_outer`, without post-hoc
+     normalization.
 
-## Jupyter Notebooks (`../notebooks/`)
+## Output figures
 
-| Notebook | Description |
-|----------|-------------|
-| [`01_basic_polygon.ipynb`](../notebooks/01_basic_polygon.ipynb) | Colab-visible demos for convex, concave, holes, and partition examples |
-| [`02_data_from_file.ipynb`](../notebooks/02_data_from_file.ipynb) | Load polygon from `../data/sample_polygon.txt` |
+Running the script writes three non-interactive PNG figures into `examples/`:
 
-## MATLAB Scripts (`../matlab/`)
+- `demo_basic_examples.png`
+- `demo_section7_paper_style.png`
+- `demo_section9_partition.png`
 
-| Script | Description |
-|--------|-------------|
-| `Demo.m` | Multi-example MATLAB demonstration |
-| `Demo_v1.m` | Legacy single-polygon demo |
+## Notes
 
-## Sample polygon data (`../data/`)
-
-`sample_polygon.txt` — a six-vertex irregular hexagon in plain-text format.
-
+- The main contour shown for the spline basis is the `0.5` iso-contour.
+- The corrected decomposition path is **additive**. It does not use the old
+  smooth-union workaround or the signed-distance fallback from PR #9.
+- Partition cells are required to share identical edge endpoints with opposite
+  orientation on shared edges; `validate_partition(...)` checks that topology.

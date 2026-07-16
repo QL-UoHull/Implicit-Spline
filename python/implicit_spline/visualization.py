@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-from .core import imp_spline_2d, partition_basis_normalized
+from .core import imp_spline_2d, partition_basis_fields
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -440,30 +440,7 @@ def partition_basis_surfaces(
     N: int = 140,
     figsize=(11, 8),
 ):
-    """Create a paper-style 2×2 figure for a polygon partition and normalized-basis sums.
-
-    The first panel shows the partition net.  The remaining three panels show
-    the **normalized** sum :math:`\\sum_k \\hat{B}_k` of per-cell basis
-    functions for different smoothing parameters.  Because the basis is
-    normalized, the sum equals 1 everywhere inside the partition domain.
-
-    Parameters
-    ----------
-    polygons : list of array-like, each shape (m_k, 2)
-        Non-overlapping convex polygon cells of the partition.
-    deltas : tuple of float, length 3
-        Transition bandwidths to show (one 3-D panel each).
-    n : int
-        Smoothness order.  Default: 2.
-    N : int
-        Grid resolution.  Default: 140.
-    figsize : tuple
-        Figure size.  Default: (11, 8).
-
-    Returns
-    -------
-    fig : matplotlib.figure.Figure
-    """
+    """Create a paper-style 2×2 figure for a polygon partition and additive basis sums."""
     polygons = [np.asarray(P, dtype=float) for P in polygons]
     if len(deltas) != 3:
         raise ValueError("deltas must contain exactly three values for a 2x2 panel")
@@ -485,16 +462,18 @@ def partition_basis_surfaces(
     X, Y = make_grid(all_pts, N=N, pad_fraction=0.10)
 
     for idx, (ax, d) in enumerate(zip(ax_surfaces, deltas), start=1):
-        basis, raw_sum = partition_basis_normalized(polygons, X, Y, delta=d, n=n)
+        basis, total = partition_basis_fields(polygons, X, Y, delta=d, n=n)
         Z = sum(basis)
         ax.plot_wireframe(X, Y, Z, rstride=4, cstride=4, color="0.35", linewidth=0.45)
         ax.view_init(elev=28, azim=-58)
-        ax.set_zlim(0.0, 1.05)
+        total_min = float(np.min(total))
+        total_max = float(np.max(total))
+        ax.set_zlim(total_min, total_max + 0.05 * max(1.0, total_max - total_min))
         ax.set_xlabel("x")
         ax.set_ylabel("y")
-        ax.set_zlabel(r"$\sum_k\hat{B}_k$")
+        ax.set_zlabel(r"$\sum_k B_k$")
         panel_label = chr(ord("a") + idx)
-        ax.set_title(rf"({panel_label}) $\delta={d}$  [normalized sum]")
+        ax.set_title(rf"({panel_label}) $\delta={d}$  [additive sum]")
 
     plt.tight_layout()
     return fig
