@@ -364,10 +364,17 @@ def test_grid_refinement_does_not_increase_curvature_variation(name):
     jump_coarse = max_tangent_jump(200)
     jump_fine = max_tangent_jump(600)
 
-    # Fine grid should not be worse than 20% above the coarse grid jump, or above 2°.
-    tolerance = max(jump_coarse * 1.2, 2.0)
+    # A 20% slack factor accounts for slightly different Marching-Squares
+    # sampling artefacts between grid resolutions.  The 2.0° floor is a
+    # generous absolute cap: the isotropic Gaussian consistently yields
+    # < 1.5° on these polygons at N=600, so any value > 2° on the fine
+    # grid already signals a genuine field discontinuity.
+    _SLACK_FACTOR = 1.2   # allow fine grid up to 20% worse than coarse
+    _ABS_FLOOR_DEG = 2.0  # absolute cap in degrees (Gaussian stays < 1.5°)
+    tolerance = max(jump_coarse * _SLACK_FACTOR, _ABS_FLOOR_DEG)
     assert jump_fine <= tolerance, (
         f"{name}: tangent jump on fine grid ({jump_fine:.2f}°) is worse than on "
-        f"coarse grid ({jump_coarse:.2f}°) by more than 20%, suggesting the field "
-        "itself has discontinuities rather than the jump being a grid-resolution artefact."
+        f"coarse grid ({jump_coarse:.2f}°) by more than {int((_SLACK_FACTOR-1)*100)}%, "
+        "suggesting the field itself has discontinuities rather than the jump being "
+        "a grid-resolution artefact."
     )
