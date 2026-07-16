@@ -4,8 +4,8 @@ Runnable examples are available in three forms:
 
 ## Standalone Python script (`demo.py`)
 
-A self-contained demo that now goes beyond the original four basic examples and
-includes paper-style figures inspired by Li & Tian (2009):
+A self-contained demo organized by feature category, with paper-style figures
+inspired by Li & Tian (2009):
 
 ```bash
 # from the repository root
@@ -14,21 +14,20 @@ python examples/demo.py
 
 The script includes:
 
-1. unit square contour,
-2. equilateral triangle contour,
-3. regular pentagon contour,
-4. delta sweep for an irregular polygon,
-5. smoothness-order (`n`) sweep,
-6. a six-panel paper-style contour figure showing how the implicit curve evolves
-   as `delta` increases,
-7. a four-panel freeform implicit-curve gallery, and
-8. a polygon-partition / summed-basis surface figure in the style of the paper.
+1. **convex polygon** demos (square/triangle/pentagon),
+2. convex **delta-sweep** and **smoothness-order** (`n`) comparisons,
+3. paper-style multi-panel contour evolution under varying `delta`,
+4. explicit **concave/freeform polygon** contour demos,
+5. **polygons with holes** (single hole + multiple holes + hole delta panel), and
+6. a true multi-polygon **2D partition** section showing both:
+   - the partition net itself, and
+   - the resulting family / sum of basis-function surfaces.
 
 ## Jupyter Notebooks (`../notebooks/`)
 
 | Notebook | Description |
 |----------|-------------|
-| [`01_basic_polygon.ipynb`](../notebooks/01_basic_polygon.ipynb) | Basic usage with hard-coded polygons, delta/n sweeps |
+| [`01_basic_polygon.ipynb`](../notebooks/01_basic_polygon.ipynb) | Colab-visible demos for convex, concave, holes, and partition examples |
 | [`02_data_from_file.ipynb`](../notebooks/02_data_from_file.ipynb) | Load polygon from `../data/sample_polygon.txt` |
 
 ## MATLAB Scripts (`../matlab/`)
@@ -48,8 +47,9 @@ The new advanced examples are intended to better match the kinds of figures
 shown in the paper:
 
 - multi-panel contour evolution under increasing `delta`,
-- freeform curve design from hand-crafted control polygons, and
-- 3D wireframe surface views of summed polygon basis functions.
+- freeform / concave curve design from hand-crafted polygons,
+- polygon-with-hole examples, and
+- 2D partition-based basis-function surfaces.
 
 These examples are illustrative rather than exact reproductions of any one
 figure from the paper, but they provide a much closer visual and conceptual
